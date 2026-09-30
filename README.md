@@ -38,6 +38,13 @@ Anything that only makes sense with knowledge of a particular private
 codebase or dialect does not belong here (see
 [docs/adr/0001-scope-and-ip-firewall.md](docs/adr/0001-scope-and-ip-firewall.md)).
 
+## Ecosystem
+
+[ptrfuzz](https://github.com/LiRvs-Miria/ptrfuzz) — a coverage-guided
+fuzzing platform for targets without sanitizer runtimes, built on symrepl's
+debugger-side infrastructure. ptrfuzz is to symrepl what Clang is to LLVM:
+from ptrfuzz M2, symrepl becomes a library dependency.
+
 ## Status
 
 Pre-MVP: scaffolding only. See the [roadmap](docs/roadmap.md) — M1

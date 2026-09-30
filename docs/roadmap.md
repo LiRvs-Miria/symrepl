@@ -36,6 +36,14 @@ Milestones are deliberately small: each is 2–3 weekend blocks.
 
 - Coverage and taint overlays on the replay trace.
 
+## Ecosystem
+
+[ptrfuzz](https://github.com/LiRvs-Miria/ptrfuzz) builds a coverage-guided
+fuzzing platform on top of symrepl's debugger-side infrastructure — the
+Clang to symrepl's LLVM. From ptrfuzz M2, symrepl becomes a library
+dependency of ptrfuzz; the standard-format firewall (ADR-0001) applies to
+both. ptrfuzz development starts after symrepl M2.
+
 ## Open questions
 
 - **Path-condition contract (blocks M1 implementation):** how much of

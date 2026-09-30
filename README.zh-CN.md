@@ -31,6 +31,13 @@ symrepl 只消费**公开标准格式**：
 任何只有了解特定私有代码库或方言才有意义的内容都不属于这里（见
 [docs/adr/0001-scope-and-ip-firewall.md](docs/adr/0001-scope-and-ip-firewall.md)）。
 
+## 生态
+
+[ptrfuzz](https://github.com/LiRvs-Miria/ptrfuzz) —— 面向无法承载 sanitizer
+runtime 目标的覆盖率引导模糊测试平台，构建在 symrepl 的调试侧基础设施之上。
+ptrfuzz 之于 symrepl，如同 Clang 之于 LLVM：从 ptrfuzz M2 起，symrepl 成为
+其库依赖。
+
 ## 状态
 
 Pre-MVP：仅脚手架。路线图见 [docs/roadmap.md](docs/roadmap.md)——下一步是

@@ -31,6 +31,13 @@
 
 - 回放轨迹上的覆盖率与污点叠加。
 
+## 生态
+
+[ptrfuzz](https://github.com/LiRvs-Miria/ptrfuzz) 在 symrepl 的调试侧基础设
+施之上构建覆盖率引导模糊测试平台——ptrfuzz 之于 symrepl，如同 Clang 之于
+LLVM。从 ptrfuzz M2 起，symrepl 成为 ptrfuzz 的库依赖；标准格式防火墙
+（ADR-0001）对两仓库同时生效。ptrfuzz 的开发在 symrepl M2 完成之后启动。
+
 ## 待决问题
 
 - **路径条件契约（阻塞 M1 实现）**：路径条件有多少能仅从 `.ktest` 对象恢复，
