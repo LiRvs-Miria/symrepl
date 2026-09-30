@@ -1,5 +1,7 @@
 # symrepl
 
+English | [简体中文](README.zh-CN.md)
+
 Replay symbolic-execution counterexamples under a real debugger.
 
 symrepl takes the artifacts produced by a symbolic executor (KLEE test
