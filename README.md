@@ -13,6 +13,23 @@ Symbolic execution answers *which input violates the property*.
 symrepl answers the question every engineer asks next: *what exactly
 happened, step by step?*
 
+## Is this for you?
+
+- You ran KLEE on a parser and it hands you `test000001.ktest` — a concrete
+  input that trips an assertion 40 branches deep. Today you would open GDB,
+  parse the binary `.ktest` format by hand, and rebuild the input. With
+  symrepl: one command opens LLDB with the input injected and breakpoints
+  set along the recorded path.
+- Your symbolic-execution or fuzzing pipeline produced 200 unique crashes,
+  and you must decide which are real. symrepl replays each under a debugger
+  and dumps the path state, making triage scriptable and comparable.
+- You teach or study symbolic execution and want to *see* how a path
+  condition steers execution, branch by branch.
+
+New to symbolic execution, or the terms above? Read the
+[five-minute background](docs/background.md) — no prior KLEE experience
+assumed.
+
 ## Why
 
 KLEE ships `klee-replay`, a minimal GDB-based replayer. Once a
