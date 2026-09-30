@@ -1,5 +1,9 @@
 # Roadmap
 
+English | [简体中文](roadmap.zh-CN.md)
+
+> The English version is authoritative; both are updated in the same commit.
+
 Milestones are deliberately small: each is 2–3 weekend blocks.
 
 ## M0 — Scaffold (done)
