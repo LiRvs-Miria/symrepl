@@ -1,6 +1,7 @@
 # ADR-0001 — Scope and IP firewall
 
-Date: 2026-09-30　　Status: Accepted
+Date: 2026-09-30　　Status: Accepted (editorially revised 2026-10-03;
+decision unchanged)
 
 English version is authoritative. 简体中文见
 [zh-CN/adr/0001-scope-and-ip-firewall.md](../../zh-CN/adr/0001-scope-and-ip-firewall.md)。
@@ -35,13 +36,9 @@ code, dialects, or pipeline knowledge.
 ## Consequences
 
 - The repository carries zero IP risk from its first line; day-job IP
-  negotiations stay decoupled from this repo (see personal plan §5.1,
-  risk 1).
+  negotiations stay decoupled from this repo.
 - Features are constrained by the "standard formats" rule: if a
   KLEE-side path condition cannot be recovered from standard
   artifacts, it is extended via a **publicly specified sidecar format**
-  (see the roadmap's open questions), never by introducing private
-  information.
-- The repo's growth narrative matches the author's public identity
-  line: positioning violation (symrepl) → construction guarantee
-  (analysis framework) → machine proof (translation validation).
+  (ADR-0002 froze the M1 contract along exactly these lines — no
+  sidecar needed), never by introducing private information.
