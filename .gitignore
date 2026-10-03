@@ -17,3 +17,6 @@ venv/
 .idea/
 .vscode/
 .DS_Store
+
+# Local agent instructions (kept out of the repo on purpose)
+AGENTS.md
