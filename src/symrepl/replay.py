@@ -15,7 +15,7 @@ Open contract question (blocks M1 implementation): how much of the
 path condition is recoverable from `.ktest` objects alone vs. requiring
 KLEE to also emit a sidecar decision log? Investigate KLEE's output
 options and freeze the contract before implementing — see
-docs/roadmap.md.
+docs/en/roadmap.md.
 """
 
 from __future__ import annotations
@@ -25,4 +25,4 @@ from .ktest import KTest
 
 def replay(ktest: KTest, target: str) -> int:
     """Replay `ktest` against `target` under LLDB. (Implemented in M1.)"""
-    raise NotImplementedError("M1 — see docs/roadmap.md")
+    raise NotImplementedError("M1 — see docs/en/roadmap.md")

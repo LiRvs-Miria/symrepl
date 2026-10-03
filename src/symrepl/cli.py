@@ -17,7 +17,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     # M1: parse ktest + drive replay.py.
-    print(f"symrepl: replay of {args.ktest} is not implemented yet (see docs/roadmap.md)")
+    print(f"symrepl: replay of {args.ktest} is not implemented yet (see docs/en/roadmap.md)")
     return 1
 
 

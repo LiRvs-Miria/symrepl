@@ -15,7 +15,7 @@ the KLEE sources before implementing the reader:
   - reader: klee/tools/klee-replay/
 
 No KLEE installation is required at runtime; this module must stay a
-pure-Python, dependency-free reader (see docs/adr/0001-scope-and-ip-firewall.md).
+pure-Python, dependency-free reader (see docs/en/adr/0001-scope-and-ip-firewall.md).
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ class KTest:
 def parse(data: bytes) -> KTest:
     """Parse a `.ktest` byte string.
 
-    Implemented in M1 — see docs/roadmap.md. The layout above must be
+    Implemented in M1 — see docs/en/roadmap.md. The layout above must be
     verified against the KLEE sources first; golden fixtures (version 2
     and 3) are generated with real KLEE output before this lands.
     """

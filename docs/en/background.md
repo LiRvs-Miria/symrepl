@@ -1,9 +1,9 @@
 # Background — five minutes
 
-English | [简体中文](background.zh-CN.md)
+English | [简体中文](../zh-CN/background.md)
 
 This page assumes nothing. If you already run KLEE daily, skim the
-glossary and jump back to the [README](../README.md).
+glossary and jump back to the [README](../../README.md).
 
 ## What symbolic execution gives you
 

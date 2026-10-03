@@ -1,9 +1,9 @@
 # 背景介绍——五分钟读完
 
-[English](background.md) | 简体中文
+[English](../en/background.md) | 简体中文
 
 本页不假设任何先验知识。如果你每天都在跑 KLEE，扫一眼术语表就可以回到
-[README](../README.md)。
+[README](../../README.md)。
 
 ## 符号执行给你什么
 

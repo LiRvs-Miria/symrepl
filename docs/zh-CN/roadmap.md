@@ -1,6 +1,6 @@
 # 路线图（Roadmap）
 
-[English](roadmap.md) | 简体中文
+[English](../en/roadmap.md) | 简体中文
 
 > 以英文版为准（authoritative）；两版在同一提交内同步更新。
 
@@ -13,9 +13,16 @@
 
 ## M1 — ktest 回放（MVP）
 
-- `.ktest` 解析器（版本 2/3）：纯 Python、零依赖，字节布局对照 KLEE 源码核实。
-- 回放驱动：经 LLDB Python API 启动目标进程，按 harness 契约注入记录的输入。
-- 路径条件感知断点：在约束记录路径的分支点设断，命中时导出变量/寄存器。
+输入契约已冻结：[ADR-0002](adr/0002-m1-input-contract.md)。
+
+- `.ktest` 解析器（v2/v3——布局完全相同；读取容忍 `BOUT\n`，版本 > 3
+  拒绝）：纯 Python、零依赖，字节布局对照 KLEE 源码核实。
+- 回放驱动：经 LLDB Python API 启动目标进程（以 `-lkleeRuntest` 链接），
+  经 `SBLaunchInfo` 注入 `KTEST_FILE`，并预先校验对象名字/大小——harness
+  契约与 KLEE 官方回放路径一致。
+- 分支追踪：对执行范围内的条件跳转逐地址设断，脚本回调按序记录 PC/结果，
+  命中时导出状态；与 KLEE fork"约束子集"的精确映射推迟到 M3（IR/DWARF）。
+- 可选诊断（永不必需）：`.kquery` 的路径条件逻辑视图 pretty-print/校验。
 - 验收：在 KLEE 教程示例（如 `get_sign`）上跑通完整闭环——`klee` 运行 →
   symrepl → 断点按序命中 → 状态报告。
 
@@ -40,6 +47,7 @@ LLVM。从 ptrfuzz M2 起，symrepl 成为 ptrfuzz 的库依赖；标准格式�
 
 ## 待决问题
 
-- **路径条件契约（阻塞 M1 实现）**：路径条件有多少能仅从 `.ktest` 对象恢复，
-  多少需要 KLEE 额外产出 sidecar 决策日志？调研 KLEE 的输出选项，然后冻结 M1
-  输入契约。若需要 sidecar，其格式必须在本仓库公开定义（见 ADR-0001）。
+- ~~**路径条件契约（阻塞 M1 实现）**~~——已于 2026-10-03 解决并冻结为
+  [ADR-0002](adr/0002-m1-input-contract.md)：M1 必选输入仅为一个 `.ktest`
+  （v2/v3）文件；路径决策经 LLDB 下的动态分支追踪恢复。不需要任何 KLEE
+  sidecar；`.kquery` 仅作为可选诊断消费。

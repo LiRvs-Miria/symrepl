@@ -21,7 +21,7 @@ symrepl 接收符号执行器产出的工件（KLEE 测试用例及其记录的�
   可脚本化、可比较。
 - 你在教或学符号执行，想亲眼看到路径条件如何逐分支"驾驶"程序执行。
 
-对符号执行或上述术语陌生？读一读[五分钟背景](docs/background.zh-CN.md)，
+对符号执行或上述术语陌生？读一读[五分钟背景](docs/zh-CN/background.md)，
 不假设任何 KLEE 使用经验。
 
 ## 为什么做这个
@@ -43,7 +43,7 @@ symrepl 只消费**公开标准格式**：
 - 调试适配协议（DAP）
 
 任何只有了解特定私有代码库或方言才有意义的内容都不属于这里（见
-[docs/adr/0001-scope-and-ip-firewall.md](docs/adr/0001-scope-and-ip-firewall.md)）。
+[docs/adr/0001-scope-and-ip-firewall.md](docs/zh-CN/adr/0001-scope-and-ip-firewall.md)）。
 
 ## 生态
 
@@ -54,7 +54,7 @@ ptrfuzz 之于 symrepl，如同 Clang 之于 LLVM：从 ptrfuzz M2 起，symrepl
 
 ## 状态
 
-Pre-MVP：仅脚手架。路线图见 [docs/roadmap.md](docs/roadmap.md)——下一步是
+Pre-MVP：仅脚手架。路线图见 [docs/roadmap.md](docs/zh-CN/roadmap.md)——下一步是
 M1（在 LLDB 下回放 ktest）。
 
 ## 计划中的依赖

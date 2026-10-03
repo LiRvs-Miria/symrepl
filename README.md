@@ -27,7 +27,7 @@ happened, step by step?*
   condition steers execution, branch by branch.
 
 New to symbolic execution, or the terms above? Read the
-[five-minute background](docs/background.md) — no prior KLEE experience
+[five-minute background](docs/en/background.md) — no prior KLEE experience
 assumed.
 
 ## Why
@@ -53,7 +53,7 @@ symrepl consumes **public, standard formats only**:
 
 Anything that only makes sense with knowledge of a particular private
 codebase or dialect does not belong here (see
-[docs/adr/0001-scope-and-ip-firewall.md](docs/adr/0001-scope-and-ip-firewall.md)).
+[docs/adr/0001-scope-and-ip-firewall.md](docs/en/adr/0001-scope-and-ip-firewall.md)).
 
 ## Ecosystem
 
@@ -64,7 +64,7 @@ from ptrfuzz M2, symrepl becomes a library dependency.
 
 ## Status
 
-Pre-MVP: scaffolding only. See the [roadmap](docs/roadmap.md) — M1
+Pre-MVP: scaffolding only. See the [roadmap](docs/en/roadmap.md) — M1
 (ktest replay under LLDB) is next.
 
 ## Requirements (planned)
