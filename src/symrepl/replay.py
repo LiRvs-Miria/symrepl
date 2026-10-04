@@ -1,28 +1,44 @@
-"""LLDB replay driver (skeleton).
+"""Replay driver: turn a parsed `.ktest` into a debugger-observed run.
 
-Design notes for M1:
-
-- Drive LLDB through its Python API (the `lldb` module), never by
-  scraping CLI output.
-- For each recorded path decision: set a breakpoint at the constraining
-  branch, run, on hit dump frames/variables, compare against the
-  recorded decision, then continue.
-- Inputs from the `.ktest` objects are injected per the harness
-  contract (stdin / argv / files, exactly as the target was built for
-  KLEE).
-
-Open contract question (blocks M1 implementation): how much of the
-path condition is recoverable from `.ktest` objects alone vs. requiring
-KLEE to also emit a sidecar decision log? Investigate KLEE's output
-options and freeze the contract before implementing — see
-docs/en/roadmap.md.
+M1-a implements the replay *path*: materialize the ktest, launch the
+target under LLDB with ``KTEST_FILE`` injected (the official kleeRuntest
+harness contract, ADR-0002), run to exit, and report the outcome along
+with any ``KLEE_RUN_TEST_ERROR`` messages.  Branch tracing and
+per-decision state dumps are M1-c (see docs/en/roadmap.md).
 """
 
 from __future__ import annotations
 
-from .ktest import KTest
+import os
+import tempfile
+
+from .ktest import KTest, dump
+from .lldb_driver import ReplayResult, run
+
+__all__ = ["ReplayResult", "replay"]
 
 
-def replay(ktest: KTest, target: str) -> int:
-    """Replay `ktest` against `target` under LLDB. (Implemented in M1.)"""
-    raise NotImplementedError("M1 — see docs/en/roadmap.md")
+def replay(
+    ktest: KTest, target: str, timeout_seconds: int = 60
+) -> ReplayResult:
+    """Replay ``ktest`` against ``target`` under LLDB.
+
+    The parsed (and therefore validated) :class:`KTest` model is the
+    source of truth: it is re-serialized with :func:`symrepl.ktest.dump`
+    into a temporary file for the harness — a byte-exact round trip, as
+    pinned by the real-KLEE fixture tests.
+
+    Raises :class:`FileNotFoundError` if ``target`` does not exist, and
+    :class:`RuntimeError` if the LLDB Python module is unavailable or
+    the launch fails.
+    """
+    if not os.path.exists(target):
+        raise FileNotFoundError(target)
+
+    fd, path = tempfile.mkstemp(suffix=".ktest", prefix="symrepl-")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(dump(ktest))
+        return run(path, target, timeout_seconds)
+    finally:
+        os.unlink(path)

@@ -1,8 +1,41 @@
-"""symrepl command-line entry point (skeleton)."""
+"""symrepl command-line entry point.
+
+Wires the M1 replay path together:
+
+    symrepl <ktest> --target <binary> [--timeout SECONDS]
+
+Exit codes:
+
+- ``0``–``255``: the target's own exit status (the replay *is* the run);
+- ``128``: the replay terminated without exiting (crash, signal);
+- ``2``: symrepl-level failure — bad arguments, unreadable `.ktest`,
+  missing target, unavailable LLDB, failed launch.
+"""
 
 from __future__ import annotations
 
 import argparse
+import sys
+
+from .ktest import KTest, KTestError, load
+from .replay import replay
+
+_CLI_ERROR = 2
+_NOT_EXITED = 128
+
+
+def _describe_objects(ktest: KTest) -> list[str]:
+    """One line per symbolic object: name, size, and a hex preview."""
+    lines = []
+    for obj in ktest.objects:
+        if obj.data:
+            preview = obj.data[:16].hex(" ")
+            more = f" ... (+{len(obj.data) - 16} bytes)" if len(obj.data) > 16 else ""
+            body = f"{preview}{more}"
+        else:
+            body = "(empty)"
+        lines.append(f"  {obj.name}: {len(obj.data)} byte(s)  {body}")
+    return lines
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -11,14 +44,75 @@ def main(argv: list[str] | None = None) -> int:
         description="Replay symbolic-execution counterexamples under LLDB.",
     )
     parser.add_argument("ktest", nargs="?", help="path to a .ktest file")
-    parser.add_argument("--target", help="path to the debuggee binary")
+    parser.add_argument(
+        "--target",
+        help="path to the debuggee binary (linked with -lkleeRuntest)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=60,
+        metavar="SECONDS",
+        help="seconds to wait for the replay to terminate (default: 60)",
+    )
     args = parser.parse_args(argv)
+
     if not args.ktest:
         parser.print_help()
         return 0
-    # M1: parse ktest + drive replay.py.
-    print(f"symrepl: replay of {args.ktest} is not implemented yet (see docs/en/roadmap.md)")
-    return 1
+    if not args.target:
+        parser.error("--target is required when replaying a .ktest")
+
+    try:
+        ktest = load(args.ktest)
+    except FileNotFoundError:
+        print(f"symrepl: error: no such .ktest file: {args.ktest}", file=sys.stderr)
+        return _CLI_ERROR
+    except KTestError as exc:
+        print(f"symrepl: error: {args.ktest}: {exc}", file=sys.stderr)
+        return _CLI_ERROR
+
+    # Flush as we go: stderr (kleeRuntest errors) is unbuffered, and
+    # piped stdout would otherwise interleave out of order.
+    print(f"symrepl: replaying {args.ktest} against {args.target}", flush=True)
+    print(
+        f"  recorded args: {list(ktest.args)}; {len(ktest.objects)} object(s)",
+        flush=True,
+    )
+    for line in _describe_objects(ktest):
+        print(line, flush=True)
+
+    try:
+        result = replay(ktest, args.target, timeout_seconds=args.timeout)
+    except FileNotFoundError:
+        print(
+            f"symrepl: error: no such target binary: {args.target}",
+            file=sys.stderr,
+        )
+        return _CLI_ERROR
+    except (RuntimeError, OSError) as exc:
+        print(f"symrepl: error: {exc}", file=sys.stderr)
+        return _CLI_ERROR
+
+    # kleeRuntest reports harness-contract violations here; they are the
+    # most likely reason a replay went sideways, so surface them first.
+    for msg in result.run_test_errors:
+        print(f"symrepl: KLEE-RUNTEST: {msg}", file=sys.stderr)
+
+    if result.state == "exited":
+        status = result.exit_code if result.exit_code is not None else 1
+        print(f"symrepl: replay exited with status {status}", flush=True)
+        return max(0, min(255, status))
+
+    print(
+        f"symrepl: replay did not exit cleanly (state: {result.state}); "
+        "inferior stderr follows",
+        file=sys.stderr,
+    )
+    if result.stderr:
+        for line in result.stderr.splitlines():
+            print(f"  {line}", file=sys.stderr)
+    return _NOT_EXITED
 
 
 if __name__ == "__main__":
