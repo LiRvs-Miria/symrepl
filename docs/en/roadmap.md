@@ -36,8 +36,30 @@ decision unchanged).
 
 ## M2 — DAP server mode
 
-- Expose replay sessions over the Debug Adapter Protocol; replay
-  becomes usable from VS Code and any DAP client.
+Architecture contract: [ADR-0003](adr/0003-m2-dap-server-architecture.md)
+(parent DAP adapter + long-lived LLDB service child; stdio/--port;
+mock-debug-aligned DAP subset; branch tracing via `stopOnBranch` and the
+`replay.branchTrace` custom request).
+
+Slices:
+
+- **M2-a skeleton** — DAP framing (stdlib, unit-tested for frame
+  coalescing), service-ified child speaking the internal protocol
+  (versioned handshake), `symrepl dap` entry (stdio + `--port`), stdio
+  hygiene, lifecycle/failure semantics (stdin-EOF suicide, shutdown
+  ladder), mock-child tests, and a `SendAsyncInterrupt` spike.
+- **M2-b1 DAP lifecycle** — initialize/launch/configurationDone,
+  threads/stackTrace/continue, terminate/disconnect (including
+  disconnect-while-running); hand-written Python test client.
+- **M2-b2 state surface** — scopes/variables (per-stop reference
+  generation), source breakpoints.
+- **M2-c branch tracing over DAP** — branch-site breakpoints,
+  `stopOnBranch`, `replay.branchTrace`, end-of-session trace report
+  via `output`, inferior output forwarding.
+- **M2-d stepping** — next/stepIn/stepOut/pause.
+- **M2-e wrap-up** — declarative VS Code extension (zero-code), en/zh
+  docs, DAP acceptance scenario, chaos tests (child crash, malformed
+  frames).
 
 ## M3 — LLVM IR / DWARF mapping
 

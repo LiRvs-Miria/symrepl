@@ -32,7 +32,27 @@
 
 ## M2 — DAP server 模式
 
-- 经调试适配协议（DAP）暴露回放会话；回放可在 VS Code 及任何 DAP 客户端中使用。
+架构契约：[ADR-0003](adr/0003-m2-dap-server-architecture.md)
+（parent DAP adapter + 常驻 LLDB service 子进程；stdio/`--port`；对齐
+mock-debug 的 DAP 子集；分支追踪经 `stopOnBranch` 与自定义请求
+`replay.branchTrace`）。
+
+切片：
+
+- **M2-a 骨架** — DAP framing（标准库，拆帧/粘包单测）、说内部协议的
+  service 化子进程（版本化握手）、`symrepl dap` 入口（stdio +
+  `--port`）、stdio 卫生、生命周期/故障语义（stdin-EOF 自杀、关机
+  阶梯）、mock child 测试、`SendAsyncInterrupt` spike。
+- **M2-b1 DAP 生命周期** — initialize/launch/configurationDone、
+  threads/stackTrace/continue、terminate/disconnect（含运行中
+  disconnect）；手写 Python 测试客户端。
+- **M2-b2 状态面** — scopes/variables（按停止点的引用代际）、源码断点。
+- **M2-c 分支追踪上 DAP** — 分支站点断点、`stopOnBranch`、
+  `replay.branchTrace`、经 `output` 的会话末尾跟踪报告、inferior 输出
+  转发。
+- **M2-d stepping** — next/stepIn/stepOut/pause。
+- **M2-e 收尾** — 声明式 VS Code 扩展（零代码）、en/zh 文档、DAP 验收
+  场景、混沌测试（子进程崩溃、畸形帧）。
 
 ## M3 — LLVM IR / DWARF 映射
 
