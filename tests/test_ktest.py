@@ -208,11 +208,11 @@ def test_load_missing_file_raises_filenotfound(tmp_path) -> None:
 # ------------------------------------------------- real-KLEE fixtures --
 #
 # Byte-for-byte artifacts from a real KLEE 3.1 run (provenance in
-# tests/fixtures/README.md). These pin the parser against KLEE itself,
+# third_party/klee/README.md). These pin the parser against KLEE itself,
 # not just against our reading of the format sources.
 
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
-REAL_FIXTURES = sorted(FIXTURES_DIR.glob("*.ktest"))
+KTEST_DIR = Path(__file__).parents[1] / "third_party" / "klee" / "ktest"
+REAL_FIXTURES = sorted(KTEST_DIR.glob("*.ktest"))
 
 
 def test_real_fixture_inventory() -> None:

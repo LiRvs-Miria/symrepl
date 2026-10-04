@@ -1,10 +1,10 @@
 """Integration tests for the M1-a replay path.
 
 These exercise the real kleeRuntest harness contract: the vendored
-runtime sources in ``tests/fixtures/klee-runtime/`` are compiled
-against a target from ``tests/fixtures/src/`` and replayed under LLDB
-via :func:`symrepl.replay`.  Everything skips cleanly when lldb or
-clang is unavailable (CI has neither; the developer machine has both).
+runtime sources in ``third_party/klee/runtime/`` are compiled against a
+target from ``tests/fixtures/src/`` and replayed under LLDB via
+:func:`symrepl.replay`.  Everything skips cleanly when lldb or clang is
+unavailable (CI has neither; the developer machine has both).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import pytest
 from symrepl.ktest import KTest, load
 from symrepl.replay import replay
 
-FIXTURES = Path(__file__).parent / "fixtures"
+KTESTS = Path(__file__).parents[1] / "third_party" / "klee" / "ktest"
 
 pytestmark = pytest.mark.skipif(
     shutil.which("lldb") is None, reason="lldb not available"
@@ -36,7 +36,7 @@ GET_SIGN_EXIT_CODES = [
 
 @pytest.mark.parametrize(("name", "code"), GET_SIGN_EXIT_CODES, ids=lambda v: v)
 def test_replay_get_sign_three_paths(get_sign_bin, name: str, code: int) -> None:
-    result = replay(load(FIXTURES / name), str(get_sign_bin))
+    result = replay(load(KTESTS / name), str(get_sign_bin))
     assert result.state == "exited"
     assert result.exit_code == code
     assert result.run_test_errors == ()
@@ -45,7 +45,7 @@ def test_replay_get_sign_three_paths(get_sign_bin, name: str, code: int) -> None
 def test_replay_name_mismatch_is_reported(get_sign_bin) -> None:
     # get_sign requests object "a"; the two_objs ktest carries ("arr", "b").
     # kleeRuntest reports the name mismatch to stderr and exits 1.
-    result = replay(load(FIXTURES / "two_objs_test000001.ktest"), str(get_sign_bin))
+    result = replay(load(KTESTS / "two_objs_test000001.ktest"), str(get_sign_bin))
     assert result.state == "exited"
     assert result.exit_code == 1
     assert any("object name mismatch" in e for e in result.run_test_errors)
@@ -86,7 +86,7 @@ TRACE_CASES = [
 def test_replay_trace_get_sign(
     get_sign_bin, name: str, code: int, hits: int, first_outcome: str
 ) -> None:
-    result = replay(load(FIXTURES / name), str(get_sign_bin), scope="get_sign")
+    result = replay(load(KTESTS / name), str(get_sign_bin), scope="get_sign")
     assert result.exit_code == code
     assert result.trace is not None
     assert len(result.trace.sites) == 2
@@ -102,7 +102,7 @@ def test_replay_trace_module_scope_smoke(get_sign_bin) -> None:
     # module scope instruments every code symbol (runtime included);
     # get_sign's two decisions still appear, after the runtime noise
     result = replay(
-        load(FIXTURES / "get_sign_test000002.ktest"),
+        load(KTESTS / "get_sign_test000002.ktest"),
         str(get_sign_bin),
         scope="module",
     )
@@ -116,9 +116,24 @@ def test_replay_trace_module_scope_smoke(get_sign_bin) -> None:
 
 def test_replay_trace_disabled(get_sign_bin) -> None:
     result = replay(
-        load(FIXTURES / "get_sign_test000001.ktest"),
+        load(KTESTS / "get_sign_test000001.ktest"),
         str(get_sign_bin),
         trace=False,
     )
     assert result.trace is None
     assert result.exit_code == 0
+
+
+def test_replay_trace_empty_scope(get_sign_bin) -> None:
+    # "traced, matched nothing" must stay distinguishable from
+    # "tracing disabled": the report structure exists, contents empty.
+    result = replay(
+        load(KTESTS / "get_sign_test000002.ktest"),
+        str(get_sign_bin),
+        scope="no_such_fn",
+    )
+    assert result.trace is not None
+    assert result.trace.scope == "no_such_fn"
+    assert result.trace.sites == ()
+    assert result.trace.hits == ()
+    assert result.exit_code == 1

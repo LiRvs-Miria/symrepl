@@ -404,7 +404,10 @@ def session_run(
         ],
         "trace": None,
     }
-    if site_index:
+    if trace:
+        # Emit the trace structure even when zero sites matched the scope —
+        # "traced, found nothing" must stay distinguishable from
+        # "tracing disabled" (trace=None).
         outcomes = _branches.infer_outcomes(
             site_index, hit_pcs, run_ended=state == int(lldb.eStateExited)
         )

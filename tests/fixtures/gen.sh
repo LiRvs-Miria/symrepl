@@ -1,11 +1,17 @@
 #!/bin/sh
-# Regenerate the real-KLEE `.ktest` fixtures committed in this directory.
+# Regenerate the real-KLEE `.ktest` fixtures committed in
+# third_party/klee/ktest/.
 #
 # Usage (from tests/fixtures/, with Docker):
 #   docker run --rm -v "$PWD":/work -w /work klee/klee:3.1 sh gen.sh
 #
-# The image matches the KLEE version recorded in README.md; regenerate
-# and update that note whenever the image tag changes.
+# The fresh test*.ktest files land in this directory; move them to
+# third_party/klee/ktest/ (updating the sha256 table in
+# third_party/klee/README.md) if they change.
+#
+# The image matches the KLEE version recorded in
+# third_party/klee/README.md; regenerate and update that note whenever
+# the image tag changes.
 set -eu
 
 run_case() {

@@ -11,7 +11,7 @@
 # Only the .ktest generation is containerized (official KLEE image);
 # the symrepl replay runs on the host and needs host clang/clang++ and
 # LLDB with Python scripting (the vendored kleeRuntest runtime from
-# tests/fixtures/klee-runtime is compiled fresh — no KLEE install).
+# third_party/klee/runtime is compiled fresh — no KLEE install).
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -44,10 +44,10 @@ pass "klee ($KLEE_IMAGE) generated 3 fresh test cases"
 # --- 2. host build: replay target linked against the vendored runtime ---
 CLANG=${CLANG:-clang}
 CLANGXX=${CLANGXX:-clang++}
-INC="$ROOT/tests/fixtures/klee-runtime/include"
-"$CLANG" -O0 -g -c "$ROOT/tests/fixtures/klee-runtime/intrinsics.c" \
+INC="$ROOT/third_party/klee/runtime/include"
+"$CLANG" -O0 -g -c "$ROOT/third_party/klee/runtime/intrinsics.c" \
   -I"$INC" -o "$WORK/build/intrinsics.o"
-"$CLANGXX" -O0 -g -std=c++17 -c "$ROOT/tests/fixtures/klee-runtime/KTest.cpp" \
+"$CLANGXX" -O0 -g -std=c++17 -c "$ROOT/third_party/klee/runtime/KTest.cpp" \
   -I"$INC" -o "$WORK/build/KTest.o"
 "$CLANG" -O0 -g "$ROOT/tests/fixtures/src/get_sign.c" -I"$INC" \
   "$WORK/build/intrinsics.o" "$WORK/build/KTest.o" -o "$WORK/build/get_sign"

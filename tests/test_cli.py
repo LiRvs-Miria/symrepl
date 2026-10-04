@@ -15,7 +15,7 @@ import pytest
 from symrepl.cli import main
 from symrepl.ktest import KTEST_MAGIC
 
-FIXTURES = Path(__file__).parent / "fixtures"
+KTESTS = Path(__file__).parents[1] / "third_party" / "klee" / "ktest"
 
 requires_lldb = pytest.mark.skipif(
     shutil.which("lldb") is None, reason="lldb not available"
@@ -32,7 +32,7 @@ def test_no_arguments_prints_help(capsys) -> None:
 
 def test_ktest_without_target_is_a_usage_error() -> None:
     with pytest.raises(SystemExit) as excinfo:
-        main([str(FIXTURES / "get_sign_test000001.ktest")])
+        main([str(KTESTS / "get_sign_test000001.ktest")])
     assert excinfo.value.code == 2
 
 
@@ -66,7 +66,7 @@ def test_cli_exit_code_passthrough(get_sign_bin: Path, capsys) -> None:
     # a > 0 in the recorded input -> get_sign returns 1.
     code = main(
         [
-            str(FIXTURES / "get_sign_test000002.ktest"),
+            str(KTESTS / "get_sign_test000002.ktest"),
             "--target",
             str(get_sign_bin),
         ]
@@ -82,7 +82,7 @@ def test_cli_reports_kleeruntest_errors(get_sign_bin: Path, capsys) -> None:
     # two_objs ktest against get_sign: name mismatch -> runtest exit 1.
     code = main(
         [
-            str(FIXTURES / "two_objs_test000001.ktest"),
+            str(KTESTS / "two_objs_test000001.ktest"),
             "--target",
             str(get_sign_bin),
         ]
@@ -96,7 +96,7 @@ def test_cli_reports_kleeruntest_errors(get_sign_bin: Path, capsys) -> None:
 def test_cli_zero_exit_path(get_sign_bin: Path) -> None:
     code = main(
         [
-            str(FIXTURES / "get_sign_test000001.ktest"),
+            str(KTESTS / "get_sign_test000001.ktest"),
             "--target",
             str(get_sign_bin),
         ]
@@ -111,7 +111,7 @@ def test_cli_zero_exit_path(get_sign_bin: Path) -> None:
 def test_cli_renders_branch_trace(get_sign_bin: Path, capsys) -> None:
     code = main(
         [
-            str(FIXTURES / "get_sign_test000002.ktest"),
+            str(KTESTS / "get_sign_test000002.ktest"),
             "--target",
             str(get_sign_bin),
             "--scope",
@@ -129,7 +129,7 @@ def test_cli_renders_branch_trace(get_sign_bin: Path, capsys) -> None:
 def test_cli_no_trace_flag(get_sign_bin: Path, capsys) -> None:
     code = main(
         [
-            str(FIXTURES / "get_sign_test000002.ktest"),
+            str(KTESTS / "get_sign_test000002.ktest"),
             "--target",
             str(get_sign_bin),
             "--no-trace",

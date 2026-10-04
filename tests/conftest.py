@@ -8,8 +8,16 @@ from pathlib import Path
 
 import pytest
 
-FIXTURES = Path(__file__).parent / "fixtures"
-RUNTIME = FIXTURES / "klee-runtime"
+TESTS = Path(__file__).parent
+ROOT = TESTS.parent
+#: Our own test-target sources (``src/``, ``gen.sh``) — see
+#: ``tests/fixtures/README.md``.
+FIXTURES = TESTS / "fixtures"
+#: Vendored KLEE artifacts (runtime sources + committed `.ktest`
+#: fixtures) — see ``third_party/klee/README.md``. Tests reference
+#: these; they own none of them.
+RUNTIME = ROOT / "third_party" / "klee" / "runtime"
+KTESTS = ROOT / "third_party" / "klee" / "ktest"
 
 
 @pytest.fixture(scope="session")
