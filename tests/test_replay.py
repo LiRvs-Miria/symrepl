@@ -59,3 +59,66 @@ def test_replay_out_of_inputs(get_sign_bin) -> None:
     assert result.state == "exited"
     assert result.exit_code == 1
     assert any("out of inputs" in e for e in result.run_test_errors)
+
+
+# ------------------------------------------------- branch tracing (M1-c) --
+#
+# get_sign traces with a function-scoped prescan: exactly two conditional
+# sites (the ``x == 0`` and ``x < 0`` checks), and the hit sequence
+# follows the recorded path of each committed ktest.
+
+TRACE_CASES = [
+    # (fixture, exit code, hit count, outcome of the first hit)
+    # a == 0: the first jcc falls through (return 0); the second is never reached
+    ("get_sign_test000001.ktest", 0, 1, "not observed (run ended)"),
+    # a > 0: first jcc taken (x != 0), second one hit (last hit -> unobserved)
+    ("get_sign_test000002.ktest", 1, 2, "taken"),
+    # a = INT_MIN: first jcc taken (x != 0), second hit falls through (unobserved)
+    ("get_sign_test000003.ktest", 255, 2, "taken"),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "code", "hits", "first_outcome"),
+    TRACE_CASES,
+    ids=[case[0] for case in TRACE_CASES],
+)
+def test_replay_trace_get_sign(
+    get_sign_bin, name: str, code: int, hits: int, first_outcome: str
+) -> None:
+    result = replay(load(FIXTURES / name), str(get_sign_bin), scope="get_sign")
+    assert result.exit_code == code
+    assert result.trace is not None
+    assert len(result.trace.sites) == 2
+    assert {s.function for s in result.trace.sites} == {"get_sign"}
+    assert len(result.trace.hits) == hits
+    assert result.trace.hits[0].outcome == first_outcome
+    # the traced frame sees the injected symbolic value
+    first_vars = dict(result.trace.hits[0].variables)
+    assert first_vars.get("x")
+
+
+def test_replay_trace_module_scope_smoke(get_sign_bin) -> None:
+    # module scope instruments every code symbol (runtime included);
+    # get_sign's two decisions still appear, after the runtime noise
+    result = replay(
+        load(FIXTURES / "get_sign_test000002.ktest"),
+        str(get_sign_bin),
+        scope="module",
+    )
+    assert result.trace is not None
+    assert len(result.trace.sites) >= 2
+    get_sign_hits = [
+        h for h in result.trace.hits if h.site.function == "get_sign"
+    ]
+    assert len(get_sign_hits) == 2
+
+
+def test_replay_trace_disabled(get_sign_bin) -> None:
+    result = replay(
+        load(FIXTURES / "get_sign_test000001.ktest"),
+        str(get_sign_bin),
+        trace=False,
+    )
+    assert result.trace is None
+    assert result.exit_code == 0

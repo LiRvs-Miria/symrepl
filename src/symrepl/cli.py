@@ -55,6 +55,18 @@ def main(argv: list[str] | None = None) -> int:
         metavar="SECONDS",
         help="seconds to wait for the replay to terminate (default: 60)",
     )
+    parser.add_argument(
+        "--scope",
+        default="module",
+        metavar="SCOPE",
+        help='branch-tracing scope: "module" or a comma-separated list '
+        'of function names (default: "module")',
+    )
+    parser.add_argument(
+        "--no-trace",
+        action="store_true",
+        help="skip branch tracing (plain replay)",
+    )
     args = parser.parse_args(argv)
 
     if not args.ktest:
@@ -83,7 +95,13 @@ def main(argv: list[str] | None = None) -> int:
         print(line, flush=True)
 
     try:
-        result = replay(ktest, args.target, timeout_seconds=args.timeout)
+        result = replay(
+            ktest,
+            args.target,
+            timeout_seconds=args.timeout,
+            trace=not args.no_trace,
+            scope=args.scope,
+        )
     except FileNotFoundError:
         print(
             f"symrepl: error: no such target binary: {args.target}",
@@ -102,17 +120,24 @@ def main(argv: list[str] | None = None) -> int:
     if result.state == "exited":
         status = result.exit_code if result.exit_code is not None else 1
         print(f"symrepl: replay exited with status {status}", flush=True)
-        return max(0, min(255, status))
+        exit_status: int = max(0, min(255, status))
+    else:
+        print(
+            f"symrepl: replay did not exit cleanly (state: {result.state}); "
+            "inferior stderr follows",
+            file=sys.stderr,
+        )
+        if result.stderr:
+            for line in result.stderr.splitlines():
+                print(f"  {line}", file=sys.stderr)
+        exit_status = _NOT_EXITED
 
-    print(
-        f"symrepl: replay did not exit cleanly (state: {result.state}); "
-        "inferior stderr follows",
-        file=sys.stderr,
-    )
-    if result.stderr:
-        for line in result.stderr.splitlines():
-            print(f"  {line}", file=sys.stderr)
-    return _NOT_EXITED
+    # The ordered branch trace is the point of the tool: decisions and
+    # the machine's view of each decision point, aligned.
+    if result.trace is not None:
+        print(result.trace.render(), flush=True)
+
+    return exit_status
 
 
 if __name__ == "__main__":

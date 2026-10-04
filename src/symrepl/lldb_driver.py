@@ -1,6 +1,7 @@
 """Thin LLDB driver: launch a target with a `.ktest` injected via
-``KTEST_FILE`` and run it to exit, capturing the inferior's exit code
-and stderr.
+``KTEST_FILE``, trace its conditional branches, and run it to exit,
+capturing the inferior's exit code, stderr, and the ordered branch
+trace with per-hit program state.
 
 This is the only module that touches the ``lldb`` Python module.  That
 module is not pip-installable — it ships with LLDB itself and is tied to
@@ -19,6 +20,17 @@ under pytest or embedded in another application — behave identically.
 The child still drives the real LLDB Python API; nothing scrapes CLI
 output (ADR-0002).
 
+Branch tracing (ADR-0002 decision 2, with one recorded deviation): at
+the entry stop the driver pre-scans the main module's code symbols for
+conditional branches (``GetControlFlowKind()`` with a per-architecture
+mnemonic fallback — see :mod:`symrepl.branches`), sets one breakpoint
+per site, and records each stop — PC, function, arguments/locals — from
+the *session side* event loop.  LLDB 22.1.8's scripted breakpoint
+callbacks silently never execute (whatever naming scheme, the bound
+callback auto-continues without running its body), so the record step
+lives in the session instead of a scripted callback; the ADR's intent
+— per-site breakpoints recording PC/outcome in order — is unchanged.
+
 kleeRuntest contract notes that shaped this driver (KLEE
 ``runtime/Runtest/intrinsics.c``):
 
@@ -30,10 +42,6 @@ kleeRuntest contract notes that shaped this driver (KLEE
   ``KLEE_RUN_TEST_ERROR:`` prefix and end in ``exit(1)`` — no signal is
   raised, so the outcome is detected from the exit state and the
   captured stderr alone.
-
-Scope (M1-a): the replay *path* only — launch, run to exit/stop, collect
-the outcome.  Branch tracing and state dumps arrive in M1-c on top of
-the same primitives (see docs/en/roadmap.md).
 """
 
 from __future__ import annotations
@@ -45,14 +53,27 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from . import branches as _branches
+from .trace import Hit, TraceReport
 
 #: Environment variable the parent sets for the child after locating
 #: ``lldb-server`` (this LLDB build does not find it on its own).
 _DEBUG_SERVER_ENV = "LLDB_DEBUGSERVER_PATH"
 
 _ERROR_PREFIX = "KLEE_RUN_TEST_ERROR: "
+
+#: Safety valve: breakpoint stops without a bound on resumes would let a
+#: pathological target spin the event loop forever.
+_MAX_RESUMES = 100_000
+
+#: A scope that instruments more sites than this is almost certainly a
+#: mistake (the report would be unreadable); fail instead.
+_MAX_SITES = 5_000
+
+_INVALID_LOAD_ADDR = 0xFFFFFFFFFFFFFFFF
 
 
 @dataclass(frozen=True)
@@ -70,6 +91,8 @@ class ReplayResult:
     #: ``KLEE_RUN_TEST_ERROR`` messages in output order, prefix stripped.
     #: Duplicates are kept (KLEE repeats "out of inputs" per call).
     run_test_errors: tuple[str, ...]
+    #: Ordered branch trace, or ``None`` when tracing was disabled.
+    trace: TraceReport | None
 
 
 def _ensure_lldb():
@@ -77,8 +100,8 @@ def _ensure_lldb():
     bootstrapping ``sys.path`` via ``lldb -P`` when the module is not
     directly importable."""
     try:
-        import lldb  # noqa: F401 — re-exported via return value
-        return sys.modules["lldb"]
+        import lldb as module
+        return module
     except ImportError:
         pass
     exe = shutil.which("lldb")
@@ -98,8 +121,8 @@ def _ensure_lldb():
     if module_path not in sys.path:
         sys.path.insert(0, module_path)
     try:
-        import lldb  # noqa: F401
-        return sys.modules["lldb"]
+        import lldb as module
+        return module
     except ImportError as exc:
         raise RuntimeError(
             "importing lldb failed even with the 'lldb -P' path added "
@@ -140,7 +163,91 @@ def _ensure_debug_server() -> None:
 # throwaway child process.
 
 
-def session_run(ktest_path: str, target: str, timeout_seconds: int) -> dict:
+def _main_module(sb_target, target: str):
+    """The main executable's module (match by basename, fall back to
+    index 0)."""
+    want = os.path.basename(target).lower()
+    for i in range(sb_target.GetNumModules()):
+        mod = sb_target.GetModuleAtIndex(i)
+        name = mod.GetFileSpec().GetFilename()
+        if name and name.lower() == want:
+            return mod
+    return sb_target.GetModuleAtIndex(0)
+
+
+def _collect_sites(
+    lldb, sb_target, scope: str, target: str
+) -> tuple[_branches.BranchSite, ...]:
+    """Pre-scan the main module's code symbols for conditional branches.
+
+    ``scope`` is ``"module"`` (every code symbol) or a comma-separated
+    list of function names.  Must run while the process is stopped at
+    the entry point: a PIE binary's load addresses only exist once the
+    dynamic linker has placed it.
+    """
+    cond_jump = int(lldb.eInstructionControlFlowKindCondJump)
+    unknown_kind = int(lldb.eInstructionControlFlowKindUnknown)
+    wanted = (
+        None
+        if scope == "module"
+        else {name.strip() for name in scope.split(",") if name.strip()}
+    )
+
+    mod = _main_module(sb_target, target)
+    sites: list[_branches.BranchSite] = []
+    seen: set[int] = set()
+    for i in range(mod.GetNumSymbols()):
+        sym = mod.GetSymbolAtIndex(i)
+        if sym.GetType() != int(lldb.eSymbolTypeCode):
+            continue
+        name = sym.GetName() or "<unnamed>"
+        if wanted is not None and name not in wanted:
+            continue
+        start = sym.GetStartAddress().GetLoadAddress(sb_target)
+        if start in seen or start in (0, _INVALID_LOAD_ADDR):
+            continue
+        seen.add(start)
+        instructions = sym.GetInstructions(sb_target)
+        for k in range(instructions.GetSize()):
+            ins = instructions.GetInstructionAtIndex(k)
+            mnemonic = ins.GetMnemonic(sb_target)
+            # GetControlFlowKind exists on LLDB >= 16 and is authoritative
+            # for x86/x86_64; without it (or for unknown kinds) the
+            # mnemonic table in symrepl.branches decides.
+            if hasattr(ins, "GetControlFlowKind"):
+                kind_value = int(ins.GetControlFlowKind(sb_target))
+                kind: int | None = (
+                    None if kind_value == unknown_kind else kind_value
+                )
+            else:
+                kind = None
+            if not _branches.is_conditional(mnemonic, kind, cond_jump):
+                continue
+            address = ins.GetAddress().GetLoadAddress(sb_target)
+            if address in (0, _INVALID_LOAD_ADDR):
+                continue
+            sites.append(
+                _branches.BranchSite(
+                    address=address,
+                    function=name,
+                    mnemonic=mnemonic,
+                    size=ins.GetByteSize(),
+                    target=_branches.parse_branch_target(
+                        ins.GetOperands(sb_target)
+                    ),
+                )
+            )
+    sites.sort(key=lambda s: s.address)
+    return tuple(sites)
+
+
+def session_run(
+    ktest_path: str,
+    target: str,
+    timeout_seconds: int,
+    trace: bool = True,
+    scope: str = "module",
+) -> dict:
     """Run ``target`` once under LLDB and return the outcome as a plain
     dict (JSON-serializable).  Child-process entry point: the process
     exits after this returns, taking the debugger with it."""
@@ -165,8 +272,8 @@ def session_run(ktest_path: str, target: str, timeout_seconds: int) -> dict:
             # The full-parameter Launch: native stdio redirection, an
             # explicit minimal environment (only KTEST_FILE — deterministic,
             # and a parent KLEE_RANDOM can never leak into the harness),
-            # and a stop at the entry point so the event loop below owns
-            # the whole run.
+            # and a stop at the entry point so the prescan and the event
+            # loop below own the whole run.
             process = sb_target.Launch(
                 listener,
                 [target],  # argv
@@ -183,11 +290,28 @@ def session_run(ktest_path: str, target: str, timeout_seconds: int) -> dict:
                 detail = error.GetCString() or "unknown error"
                 raise RuntimeError(f"lldb failed to launch {target}: {detail}")
 
+            # Prescan at the entry stop (PIE load addresses exist now),
+            # then one breakpoint per conditional site.
+            sites: tuple[_branches.BranchSite, ...] = ()
+            site_index: dict[int, _branches.BranchSite] = {}
+            if trace:
+                sites = _collect_sites(lldb, sb_target, scope, target)
+                if len(sites) > _MAX_SITES:
+                    raise RuntimeError(
+                        f"scope {scope!r} matches {len(sites)} conditional "
+                        f"sites (>{_MAX_SITES}); narrow it, e.g. "
+                        "--scope <function>"
+                    )
+                for site in sites:
+                    sb_target.BreakpointCreateByAddress(site.address)
+                site_index = {s.address: s for s in sites}
+
             terminal = frozenset(
                 {
                     int(lldb.eStateExited),
                     int(lldb.eStateCrashed),
                     int(lldb.eStateDetached),
+                    int(lldb.eStateInvalid),
                 }
             )
             names = {
@@ -205,7 +329,13 @@ def session_run(ktest_path: str, target: str, timeout_seconds: int) -> dict:
                 int(lldb.eStateInvalid): "invalid",
             }
 
+            stopped = int(lldb.eStateStopped)
+            hit_pcs: list[int] = []
+            hit_vars: list[tuple[tuple[str, str], ...]] = []
+            resumes = 0
+
             process.Continue()  # async: returns immediately
+            state = int(lldb.eStateInvalid)
             while True:
                 event = lldb.SBEvent()
                 if not listener.WaitForEvent(timeout_seconds, event):
@@ -221,8 +351,32 @@ def session_run(ktest_path: str, target: str, timeout_seconds: int) -> dict:
                 state = int(lldb.SBProcess.GetStateFromEvent(event))
                 if state in terminal:
                     break
-                if state == int(lldb.eStateStopped):
-                    process.Continue()
+                if state != stopped:
+                    continue
+                # A breakpoint stop: record the site, then resume.  (The
+                # stale entry-stop event also lands here; its PC is not a
+                # site and is simply resumed.)
+                cur = int(process.GetState())
+                if cur != stopped:
+                    continue  # already resumed (e.g. stale event)
+                thread = process.GetSelectedThread()
+                if thread is not None and thread.GetNumFrames() > 0:
+                    frame = thread.GetFrameAtIndex(0)
+                    pc = int(frame.GetPC())
+                    if pc in site_index:
+                        variables = tuple(
+                            (v.GetName(), v.GetValue() or "")
+                            for v in frame.GetVariables(True, True, False, True)
+                        )
+                        hit_pcs.append(pc)
+                        hit_vars.append(variables)
+                resumes += 1
+                if resumes > _MAX_RESUMES:
+                    raise RuntimeError(
+                        f"exceeded {_MAX_RESUMES} breakpoint resumes; "
+                        "aborting a pathological trace"
+                    )
+                process.Continue()
 
             # The process object is the authority on the final state; the
             # last event may lag behind it.
@@ -239,7 +393,7 @@ def session_run(ktest_path: str, target: str, timeout_seconds: int) -> dict:
 
         stderr_text = Path(stderr_path).read_text(errors="replace")
 
-    return {
+    payload: dict = {
         "exit_code": exit_code,
         "state": state_name,
         "stderr": stderr_text,
@@ -248,7 +402,35 @@ def session_run(ktest_path: str, target: str, timeout_seconds: int) -> dict:
             for line in stderr_text.splitlines()
             if line.startswith(_ERROR_PREFIX)
         ],
+        "trace": None,
     }
+    if site_index:
+        outcomes = _branches.infer_outcomes(
+            site_index, hit_pcs, run_ended=state == int(lldb.eStateExited)
+        )
+        hits = tuple(
+            Hit(
+                order=i + 1,
+                site=site_index[pc],
+                variables=variables,
+                outcome=outcomes[i],
+            )
+            for i, (pc, variables) in enumerate(zip(hit_pcs, hit_vars))
+        )
+        payload["trace"] = {
+            "scope": scope,
+            "sites": [asdict(s) for s in sites],
+            "hits": [
+                {
+                    "order": h.order,
+                    "address": h.site.address,
+                    "variables": [list(v) for v in h.variables],
+                    "outcome": h.outcome,
+                }
+                for h in hits
+            ],
+        }
+    return payload
 
 
 # ------------------------------------------------------------------- run --
@@ -260,10 +442,18 @@ def _child_main(argv: list[str]) -> int:
     parser.add_argument("--ktest", required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--timeout", type=int, default=60)
+    parser.add_argument("--trace", action="store_true")
+    parser.add_argument("--scope", default="module")
     parser.add_argument("--out", required=True, help="result JSON path")
     args = parser.parse_args(argv)
     try:
-        result = session_run(args.ktest, args.target, args.timeout)
+        result = session_run(
+            args.ktest,
+            args.target,
+            args.timeout,
+            trace=args.trace,
+            scope=args.scope,
+        )
         result["error"] = None
     except Exception as exc:  # noqa: BLE001 — reported to the parent verbatim
         result = {"error": f"{type(exc).__name__}: {exc}"}
@@ -271,7 +461,32 @@ def _child_main(argv: list[str]) -> int:
     return 0
 
 
-def run(ktest_path: str, target: str, timeout_seconds: int = 60) -> ReplayResult:
+def _trace_from_payload(payload: dict) -> TraceReport | None:
+    """Rebuild the :class:`TraceReport` from the child's JSON payload."""
+    raw = payload.get("trace")
+    if raw is None:
+        return None
+    sites = tuple(_branches.BranchSite(**s) for s in raw["sites"])
+    by_address = {s.address: s for s in sites}
+    hits = tuple(
+        Hit(
+            order=h["order"],
+            site=by_address[h["address"]],
+            variables=tuple(tuple(v) for v in h["variables"]),
+            outcome=h["outcome"],
+        )
+        for h in raw["hits"]
+    )
+    return TraceReport(scope=raw["scope"], sites=sites, hits=hits)
+
+
+def run(
+    ktest_path: str,
+    target: str,
+    timeout_seconds: int = 60,
+    trace: bool = True,
+    scope: str = "module",
+) -> ReplayResult:
     """Run ``target`` to completion under LLDB with ``KTEST_FILE``
     pointing at ``ktest_path``, in an isolated child process.
 
@@ -282,20 +497,22 @@ def run(ktest_path: str, target: str, timeout_seconds: int = 60) -> ReplayResult
 
     with tempfile.TemporaryDirectory(prefix="symrepl-driver-") as tmp:
         out_path = os.path.join(tmp, "result.json")
+        cmd = [
+            sys.executable,
+            "-m",
+            "symrepl.lldb_driver",
+            "--ktest",
+            ktest_path,
+            "--target",
+            target,
+            "--timeout",
+            str(timeout_seconds),
+        ]
+        if trace:
+            cmd += ["--trace", "--scope", scope]
+        cmd += ["--out", out_path]
         proc = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "symrepl.lldb_driver",
-                "--ktest",
-                ktest_path,
-                "--target",
-                target,
-                "--timeout",
-                str(timeout_seconds),
-                "--out",
-                out_path,
-            ],
+            cmd,
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
@@ -316,6 +533,7 @@ def run(ktest_path: str, target: str, timeout_seconds: int = 60) -> ReplayResult
         state=payload["state"],
         stderr=payload["stderr"],
         run_test_errors=tuple(payload["run_test_errors"]),
+        trace=_trace_from_payload(payload),
     )
 
 

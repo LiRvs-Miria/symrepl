@@ -17,7 +17,7 @@ from symrepl.ktest import KTEST_MAGIC
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
-pytestmark = pytest.mark.skipif(
+requires_lldb = pytest.mark.skipif(
     shutil.which("lldb") is None, reason="lldb not available"
 )
 
@@ -61,6 +61,7 @@ def test_missing_target_reports_error(capsys, tmp_path) -> None:
 # ------------------------------------------------------------------ L2 --
 
 
+@requires_lldb
 def test_cli_exit_code_passthrough(get_sign_bin: Path, capsys) -> None:
     # a > 0 in the recorded input -> get_sign returns 1.
     code = main(
@@ -76,6 +77,7 @@ def test_cli_exit_code_passthrough(get_sign_bin: Path, capsys) -> None:
     assert "a: 4 byte(s)  01 01 01 01" in out.out
 
 
+@requires_lldb
 def test_cli_reports_kleeruntest_errors(get_sign_bin: Path, capsys) -> None:
     # two_objs ktest against get_sign: name mismatch -> runtest exit 1.
     code = main(
@@ -90,6 +92,7 @@ def test_cli_reports_kleeruntest_errors(get_sign_bin: Path, capsys) -> None:
     assert "KLEE-RUNTEST: object name mismatch" in err
 
 
+@requires_lldb
 def test_cli_zero_exit_path(get_sign_bin: Path) -> None:
     code = main(
         [
@@ -99,3 +102,38 @@ def test_cli_zero_exit_path(get_sign_bin: Path) -> None:
         ]
     )
     assert code == 0
+
+
+# --------------------------------------------------- branch tracing (L2) --
+
+
+@requires_lldb
+def test_cli_renders_branch_trace(get_sign_bin: Path, capsys) -> None:
+    code = main(
+        [
+            str(FIXTURES / "get_sign_test000002.ktest"),
+            "--target",
+            str(get_sign_bin),
+            "--scope",
+            "get_sign",
+        ]
+    )
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "branch trace: scope=get_sign" in out
+    assert "#1" in out
+    assert "-> taken" in out
+
+
+@requires_lldb
+def test_cli_no_trace_flag(get_sign_bin: Path, capsys) -> None:
+    code = main(
+        [
+            str(FIXTURES / "get_sign_test000002.ktest"),
+            "--target",
+            str(get_sign_bin),
+            "--no-trace",
+        ]
+    )
+    assert code == 1
+    assert "branch trace" not in capsys.readouterr().out
