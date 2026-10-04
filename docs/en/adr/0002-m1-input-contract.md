@@ -1,6 +1,7 @@
 # ADR-0002 — M1 input contract frozen: single `.ktest` + dynamic branch tracing
 
-Date: 2026-10-03　　Status: Accepted
+Date: 2026-10-03　　Status: Accepted (editorially revised 2026-10-04;
+decision unchanged)
 
 English version is authoritative. 简体中文见
 [zh-CN/adr/0002-m1-input-contract.md](../../zh-CN/adr/0002-m1-input-contract.md)。
@@ -61,6 +62,14 @@ tracing":
    modules), with the report distinguishing concrete-only branches; the
    precise mapping of traced branches to the KLEE-fork "constraining"
    subset is **deferred to M3** (IR/DWARF).
+
+> **Revision (2026-10-04, editorial).** Item 2's recording mechanism
+> changed in implementation: LLDB 22.1.8's scripted breakpoint callbacks
+> silently never execute (under any naming scheme the binding
+> auto-continues without running the callback body), so per-hit
+> recording happens *session-side* from the driver's event loop.  The
+> decision itself — one breakpoint per conditional site, recording
+> PC/outcome in order — is unchanged.
 
 ## Consequences
 
