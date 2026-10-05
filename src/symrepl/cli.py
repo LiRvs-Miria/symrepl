@@ -43,13 +43,6 @@ def _describe_objects(ktest: KTest) -> list[str]:
     return lines
 
 
-def _dap_main(argv: list[str]) -> int:
-    """Run the DAP server skeleton (see :mod:`symrepl.dap_server`)."""
-    from . import dap_server  # deferred: keeps the replay path import-free
-
-    return _CLI_ERROR if dap_server.main(argv) != 0 else 0
-
-
 def main(argv: list[str] | None = None) -> int:
     tokens = sys.argv[1:] if argv is None else list(argv)
     if tokens[:1] == ["dap"]:
