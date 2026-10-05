@@ -101,6 +101,7 @@ class DapServer:
         # configurationDone — and the session wind-down flag.
         self._pending_launch: int | None = None
         self._closing = False
+        self._abnormal = False
         self._handlers = {
             "initialize": self._dap_initialize,
             "launch": self._dap_launch,
@@ -155,6 +156,12 @@ class DapServer:
         """
         if not self._child_ready.wait(timeout):
             raise TimeoutError("service child did not start")
+        # A dead child never answers: fail fast instead of burning the
+        # caller's timeout (decision 8 — requests fail, never hang).
+        if self._child is not None and self._child.poll() is not None:
+            raise _ChildRequestError(
+                "child_gone", "service child is no longer running"
+            )
         request = _PendingRequest()
         with self._pending_lock:
             self._request_id += 1
@@ -221,18 +228,35 @@ class DapServer:
         while True:
             kind, payload = self._events.get()
             if kind == "client-eof":
+                if self._abnormal:
+                    # Session ended by a mid-run child death: the
+                    # terminated event went out, requests failed fast,
+                    # and the exit code still reports the abnormality.
+                    self._terminate_child()
+                    return _EXIT_FAILURE
                 return _EXIT_OK  # clean shutdown; ladder runs in run()
             if kind == "client-error":
                 return self._fail(f"malformed client frame: {payload}")
             if kind == "child-eof":
                 if self._closing:
                     return _EXIT_OK  # disconnect/terminate wind-down
-                return self._fail(
-                    "service child exited unexpectedly "
-                    f"(code={payload})"
+                # Decision 8: translate the child's death into a DAP
+                # terminated event, fail in-flight requests, then keep
+                # serving fast-fail responses until the client hangs up
+                # (pinned by the chaos tests).
+                self._abnormal = True
+                self._closing = True
+                self._fail_pending_requests(
+                    f"service child exited (code={payload})"
                 )
+                self._send_event("terminated", {})
             if kind == "child-error":
-                return self._fail(f"malformed child frame: {payload}")
+                self._abnormal = True
+                self._closing = True
+                self._fail_pending_requests(
+                    f"malformed child frame: {payload}"
+                )
+                self._send_event("terminated", {})
             if kind == "client-frame":
                 assert isinstance(payload, dict)
                 problem = self._handle_client_message(payload)
@@ -803,6 +827,17 @@ class DapServer:
         request.result = message.get("result")
         request.error = message.get("error")
         request.done.set()
+
+    def _fail_pending_requests(self, message: str) -> None:
+        """Decision 8: a dying child must not leave requests hanging —
+        resolve every in-flight request with an error."""
+        with self._pending_lock:
+            requests = list(self._pending.values())
+            self._pending.clear()
+        for request in requests:
+            request.ok = False
+            request.error = {"code": "child_died", "message": message}
+            request.done.set()
 
     # ---------------------------------------------------------- output --
 
