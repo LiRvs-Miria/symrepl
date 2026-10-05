@@ -221,6 +221,25 @@ class _Service:
                 }
             )
             return None
+        except Exception as exc:  # noqa: BLE001 — the protocol error
+            # envelope is the only safe failure mode: a crashing command
+            # must never take the service process down with it.
+            self._log(
+                f"symrepl-service: {cmd} raised "
+                f"{type(exc).__name__}: {exc}\n"
+            )
+            self._send(
+                {
+                    "type": "response",
+                    "id": message_id,
+                    "ok": False,
+                    "error": {
+                        "code": "internal_error",
+                        "message": f"{type(exc).__name__}: {exc}",
+                    },
+                }
+            )
+            return None
         self._send(
             {
                 "type": "response",
@@ -265,7 +284,31 @@ class _Service:
                 self._require_session("terminate").terminate()
             )
             return {}
+        if cmd == "scopes":
+            return {
+                "scopes": self._require_session("scopes").scopes(
+                    params.get("frame_id", 0)
+                )
+            }
+        if cmd == "variables":
+            return {
+                "variables": self._require_session("variables").variables(
+                    params.get("variables_reference", 0)
+                )
+            }
+        if cmd == "set_breakpoints":
+            return self._cmd_set_breakpoints(params)
         raise SessionError("unknown_command", f"unknown command: {cmd!r}")
+
+    def _cmd_set_breakpoints(self, params: dict) -> dict:
+        session = self._require_session("set_breakpoints")
+        path = params.get("path")
+        if not isinstance(path, str):
+            raise SessionError("bad_request", "path must be a string")
+        lines = params.get("lines")
+        if not isinstance(lines, list):
+            raise SessionError("bad_request", "lines must be a list")
+        return session.set_breakpoints(path, lines)
 
     def _cmd_launch(self, params: dict) -> dict:
         if self._session is not None:

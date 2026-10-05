@@ -10,7 +10,7 @@ M2-b1 implements the lifecycle surface on that transport: initialize
 (capabilities frozen per decision 4), launch (response withheld until
 configurationDone), threads/stackTrace/continue, and
 terminate/disconnect (always kill, decision 8).  Anything else still
-answers ``success: false`` "not implemented until M2-b2"; DAP event
+answers ``success: false`` "not implemented until M2-c"; DAP event
 semantics for child death (``terminated`` translation) are live as of
 M2-b1.
 
@@ -106,6 +106,9 @@ class DapServer:
             "configurationDone": self._dap_configuration_done,
             "threads": self._dap_threads,
             "stackTrace": self._dap_stack_trace,
+            "scopes": self._dap_scopes,
+            "variables": self._dap_variables,
+            "setBreakpoints": self._dap_set_breakpoints,
             "continue": self._dap_continue,
             "terminate": self._dap_terminate,
             "disconnect": self._dap_disconnect,
@@ -306,7 +309,7 @@ class DapServer:
                 message.get("seq"),
                 command,
                 success=False,
-                message="not implemented until M2-b2",
+                message="not implemented until M2-c",
             )
             return None
         return handler(message.get("seq"), message.get("arguments") or {})
@@ -480,6 +483,110 @@ class DapServer:
         )
         return None
 
+    def _dap_scopes(self, seq, arguments: dict) -> str | None:
+        try:
+            result = self._child_request(
+                "scopes",
+                {"frame_id": arguments.get("frameId", 0)},
+                timeout=10.0,
+            )
+        except (TimeoutError, RuntimeError) as exc:
+            self._send_response(
+                seq, "scopes", success=False, message=f"service child: {exc}"
+            )
+            return None
+        self._send_response(
+            seq,
+            "scopes",
+            success=True,
+            body={
+                "scopes": [
+                    {
+                        "name": s["name"],
+                        "variablesReference": s["variables_reference"],
+                        "expensive": False,
+                    }
+                    for s in result.get("scopes", [])
+                ],
+            },
+        )
+        return None
+
+    def _dap_variables(self, seq, arguments: dict) -> str | None:
+        try:
+            result = self._child_request(
+                "variables",
+                {
+                    "variables_reference": arguments.get(
+                        "variablesReference", 0
+                    )
+                },
+                timeout=10.0,
+            )
+        except (TimeoutError, RuntimeError) as exc:
+            self._send_response(
+                seq,
+                "variables",
+                success=False,
+                message=f"service child: {exc}",
+            )
+            return None
+        self._send_response(
+            seq,
+            "variables",
+            success=True,
+            body={
+                "variables": [
+                    {
+                        "name": v["name"],
+                        "value": v["value"],
+                        "type": v.get("type", ""),
+                        "variablesReference": v.get("variables_reference", 0),
+                    }
+                    for v in result.get("variables", [])
+                ],
+            },
+        )
+        return None
+
+    def _dap_set_breakpoints(self, seq, arguments: dict) -> str | None:
+        source = arguments.get("source") or {}
+        params = {
+            "path": source.get("path"),
+            "lines": [
+                bp.get("line")
+                for bp in arguments.get("breakpoints", [])
+                if isinstance(bp, dict)
+            ],
+        }
+        try:
+            result = self._child_request(
+                "set_breakpoints", params, timeout=10.0
+            )
+        except (TimeoutError, RuntimeError) as exc:
+            self._send_response(
+                seq,
+                "setBreakpoints",
+                success=False,
+                message=f"service child: {exc}",
+            )
+            return None
+        self._send_response(
+            seq,
+            "setBreakpoints",
+            success=True,
+            body={
+                "breakpoints": [
+                    {
+                        "verified": bp.get("verified", False),
+                        "line": bp.get("line"),
+                    }
+                    for bp in result.get("breakpoints", [])
+                ],
+            },
+        )
+        return None
+
     def _dap_continue(self, seq, _arguments: dict) -> str | None:
         try:
             self._child_request("continue", {}, timeout=10.0)
@@ -576,6 +683,8 @@ class DapServer:
             }
             if params.get("description"):
                 body["description"] = params["description"]
+            if params.get("breakpoint_ids"):
+                body["hitBreakpointIds"] = params["breakpoint_ids"]
             self._send_event("stopped", body)
             return True
         if event == "exited":
@@ -613,10 +722,23 @@ class DapServer:
     def _send_client(self, payload: dict) -> None:
         """The only client writer: the run loop (ordering invariant,
         ADR-0003 decision 4 — a response is always on the wire before
-        any event it causes)."""
-        self._client_seq += 1
-        payload["seq"] = self._client_seq
-        self._client_write(encode_frame(payload))
+        any event it causes).
+
+        A client that disconnects mid-forward is a normal end-of-session
+        race, not a failure: the write is dropped and the closing flag
+        routes the wind-down (the client-eof from the pump ends the
+        loop; the shutdown ladder in run() reaps the child).
+        """
+        try:
+            self._client_seq += 1
+            payload["seq"] = self._client_seq
+            self._client_write(encode_frame(payload))
+        except (BrokenPipeError, OSError) as exc:
+            print(
+                f"symrepl-dap: client transport broken: {exc}",
+                file=sys.stderr,
+            )
+            self._closing = True
 
     def _send_response(
         self,
