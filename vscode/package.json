@@ -1,0 +1,60 @@
+{
+  "name": "symrepl",
+  "displayName": "symrepl (KLEE replay)",
+  "description": "Replay symbolic-execution counterexamples (KLEE .ktest) under a real debugger (LLDB) — ADR-0003 decision 14, declarative zero-code adapter.",
+  "version": "0.1.0",
+  "publisher": "symrepl",
+  "license": "Apache-2.0 WITH LLVM-exception",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Debuggers"
+  ],
+  "contributes": {
+    "debuggers": [
+      {
+        "type": "symrepl",
+        "label": "symrepl (KLEE replay under LLDB)",
+        "program": "./dap_adapter",
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "ktest",
+              "target"
+            ],
+            "properties": {
+              "ktest": {
+                "type": "string",
+                "description": "Path to the KLEE test case (.ktest) to replay."
+              },
+              "target": {
+                "type": "string",
+                "description": "Path to the debuggee binary (linked with -lkleeRuntest)."
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "default": false,
+                "description": "Stop the inferior at the entry point."
+              },
+              "stopOnBranch": {
+                "type": "boolean",
+                "default": false,
+                "description": "Stop at every traced conditional branch (default: sites record-and-continue, M1 parity)."
+              },
+              "scope": {
+                "type": "string",
+                "default": "module",
+                "description": "Branch-tracing scope: 'module' or a comma-separated list of function names."
+              },
+              "timeout": {
+                "type": "number",
+                "description": "Seconds before the run is aborted (off by default — interactive sessions have no global timeout)."
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

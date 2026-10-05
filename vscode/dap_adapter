@@ -1,0 +1,6 @@
+#!/bin/sh
+# VS Code zero-code adapter launcher (ADR-0003 decision 14, Linux-first):
+# exec the symrepl DAP server on stdio.  A "debugServer" launch.json
+# entry connects to an already-running `symrepl dap --port N` instead —
+# that is how development and the test suite drive the server.
+exec python3 -m symrepl.cli dap "$@"
