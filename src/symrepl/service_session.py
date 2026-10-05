@@ -113,6 +113,7 @@ class LldbSession:
         self._trace_enabled = False
         self._resume_count = 0
         self._exit_code: int | None = None
+        self._pause_pending = False
         # Inferior output forwarding (decision 13: droppable, bounded).
         self._io_offsets = {"stdout": 0, "stderr": 0}
         self._dropped = {"stdout": 0, "stderr": 0}
@@ -332,6 +333,45 @@ class LldbSession:
             "stopped", code="not_stopped", action="continue"
         )
         self._resume()
+        return []
+
+    def step(self, kind: str, thread_id: int) -> list[dict]:
+        """One stepping operation (M2-d); the completion arrives as a
+        ``stopped(reason: "step")`` event."""
+        self._require_phase(
+            "stopped", code="not_stopped", action="step"
+        )
+        thread = self._process.GetThreadByID(int(thread_id))
+        if not thread.IsValid():
+            raise SessionError("no_thread", f"no thread with id {thread_id}")
+        operations = {
+            "next": thread.StepOver,
+            "stepIn": thread.StepInto,
+            "stepOut": thread.StepOut,
+        }
+        operation = operations.get(kind)
+        if operation is None:
+            raise SessionError("bad_request", f"unknown step kind: {kind!r}")
+        # Spike rule: drain queued events before issuing the operation.
+        event = self._lldb.SBEvent()
+        while self._listener.GetNextEvent(event):
+            pass
+        # Decision 12: a step is a resume.
+        self._generation += 1
+        self._var_refs.clear()
+        operation()  # async: the completion arrives as a stop event
+        self._phase = "running"
+        return []
+
+    def pause(self) -> list[dict]:
+        """Async-interrupt the running inferior (the spike-verified
+        ``SendAsyncInterrupt`` path, decision 7); the completion arrives
+        as a ``stopped(reason: "pause")`` event."""
+        self._require_phase(
+            "running", code="not_stopped", action="pause"
+        )
+        self._pause_pending = True
+        self._process.SendAsyncInterrupt()
         return []
 
     def _resume(self) -> None:
@@ -644,6 +684,13 @@ class LldbSession:
             if thread is not None and thread.IsValid()
             else 0
         )
+        if self._pause_pending:
+            # A pause beats a traced site's auto-continue: the user
+            # asked for the inferior to stop, so it stops.
+            self._pause_pending = False
+            self._begin_reported_stop()
+            self._phase = "stopped"
+            return [self._stopped_event("pause")]
         if (
             raw == int(self._lldb.eStopReasonBreakpoint)
             and pc in self._site_index
@@ -700,8 +747,14 @@ class LldbSession:
                     int(thread.GetStopReasonDataAtIndex(i))
                     for i in range(thread.GetStopReasonDataCount())
                 ]
-            elif raw == int(self._lldb.eStopReasonTrace):
-                reason = "step"  # M2-d surfaces these
+            elif raw in (
+                int(self._lldb.eStopReasonTrace),
+                int(self._lldb.eStopReasonPlanComplete),
+            ):
+                # eStopReasonTrace is instruction-level stepping;
+                # PlanComplete is what StepOver/StepInto/StepOut report
+                # on completion (M2-d).
+                reason = "step"
             elif raw not in exceptions:
                 reason = "exception"
             description = thread.GetStopDescription(256) or ""
