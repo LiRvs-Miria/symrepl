@@ -34,7 +34,7 @@ decision unchanged).
   works — `klee` run → symrepl → breakpoints hit in order → state
   report. Runnable end-to-end via `sh scripts/acceptance.sh`.
 
-## M2 — DAP server mode
+## M2 — DAP server mode (done 2026-10-05)
 
 Architecture contract: [ADR-0003](adr/0003-m2-dap-server-architecture.md)
 (parent DAP adapter + long-lived LLDB service child; stdio/--port;

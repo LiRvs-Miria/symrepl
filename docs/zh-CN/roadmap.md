@@ -30,7 +30,7 @@
 - 验收：在 KLEE 教程示例（`get_sign`）上跑通完整闭环——`klee` 运行 →
   symrepl → 断点按序命中 → 状态报告；一键运行 `sh scripts/acceptance.sh`。
 
-## M2 — DAP server 模式
+## M2 — DAP server 模式（已完成 2026-10-05）
 
 架构契约：[ADR-0003](adr/0003-m2-dap-server-architecture.md)
 （parent DAP adapter + 常驻 LLDB service 子进程；stdio/`--port`；对齐
