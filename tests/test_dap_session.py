@@ -86,15 +86,15 @@ class _Client:
         )
 
     def wait_event(self, name: str) -> dict:
-        """Return the already-collected event, reading frames until it
-        arrives (bounded by the socket timeout)."""
+        """Return the (consumed) event, reading frames until it
+        arrives — repeated waits see later events of the same name."""
         while True:
-            for message in self.events:
+            for index, message in enumerate(self.events):
                 if (
                     message.get("type") == "event"
                     and message.get("event") == name
                 ):
-                    return message
+                    return self.events.pop(index)
             message = self._reader.read_frame()
             if message.get("type") == "event":
                 self.events.append(message)
@@ -241,6 +241,76 @@ def test_dap_launch_rejects_missing_ktest(get_sign_bin):
         # Nothing was launched: no initialized event ever fired.
         assert not [e for e in client.events if e.get("event") == "initialized"]
         client.close()
+        thread.join(timeout=15)
+        assert server.exit_code == 0
+
+
+def test_dap_breakpoints_variables_and_stale_reference(get_sign_bin):
+    """Decision 12 in action: a resume invalidates the previous stop's
+    references; breakpoint hits report hitBreakpointIds; variables at
+    the breakpoint frame read the injected symbolic value."""
+    with dap_session() as (server, client, thread):
+        _launch_get_sign(client, KTESTS / "get_sign_test000002.ktest",
+                         get_sign_bin, stop_on_entry=True)
+        reply = client.request("configurationDone")
+        assert reply["success"] is True
+        stopped = client.wait_event("stopped")
+        assert stopped["body"]["reason"] == "entry"
+        thread_id = stopped["body"]["threadId"]
+
+        # Generation-1 frame ids and references.
+        reply = client.request("stackTrace", {"threadId": thread_id})
+        assert reply["success"] is True
+        old_frame_id = reply["body"]["stackFrames"][0]["id"]
+        reply = client.request("scopes", {"frameId": old_frame_id})
+        assert reply["success"] is True
+        old_ref = reply["body"]["scopes"][0]["variablesReference"]
+
+        # Breakpoint on `return 1;` — hit by the x > 0 recorded path.
+        source = Path(__file__).parent / "fixtures" / "src" / "get_sign.c"
+        reply = client.request(
+            "setBreakpoints",
+            {
+                "source": {"path": str(source)},
+                "breakpoints": [{"line": 15}],
+            },
+        )
+        assert reply["success"] is True
+        bp = reply["body"]["breakpoints"][0]
+        assert bp["verified"] is True and bp["line"] == 15
+
+        reply = client.request("continue")
+        assert reply["success"] is True
+        stopped = client.wait_event("stopped")
+        assert stopped["body"]["reason"] == "breakpoint"
+        assert stopped["body"]["hitBreakpointIds"]  # the bp we just set
+
+        # New generation: frame ids re-stamped, variables resolve.
+        reply = client.request("stackTrace", {"threadId": thread_id})
+        new_frame_id = reply["body"]["stackFrames"][0]["id"]
+        assert new_frame_id > old_frame_id  # generation advanced
+        reply = client.request("scopes", {"frameId": new_frame_id})
+        assert reply["success"] is True
+        new_ref = reply["body"]["scopes"][0]["variablesReference"]
+        reply = client.request("variables", {"variablesReference": new_ref})
+        assert reply["success"] is True
+        variables = {v["name"]: v for v in reply["body"]["variables"]}
+        assert "x" in variables  # the symbolic argument
+        assert variables["x"]["value"]  # materialized by kleeRuntest
+
+        # The pre-resume reference is stale (decision 12).
+        reply = client.request("variables", {"variablesReference": old_ref})
+        assert reply["success"] is False
+        assert "stale" in reply["message"].lower()
+
+        reply = client.request("continue")
+        assert reply["success"] is True
+        exited = client.wait_event("exited")
+        assert exited["body"]["exitCode"] == 1
+        client.wait_event("terminated")
+
+        reply = client.request("disconnect")
+        assert reply["success"] is True
         thread.join(timeout=15)
         assert server.exit_code == 0
 

@@ -73,8 +73,12 @@ if mode == "badversion":
 send(stdout, {"type": "hello", "version": 1})
 
 if mode == "lifecycle":
-    # M2-b1 session surface: launch/config_done/continue/threads/
-    # stack_trace/terminate with a scripted run to exit(7).
+    # M2-b1/b2 session surface: lifecycle + state surface.  Reference
+    # generations are simulated: gen starts at 1 and bumps on a
+    # breakpoint hit, so pre-hit references go stale afterwards.
+    gen = 1
+    bps = False
+    bp_hit = False
     while True:
         try:
             message = read_frame(stdin)
@@ -91,15 +95,28 @@ if mode == "lifecycle":
         elif command == "config_done":
             send(stdout, {"type": "response", "id": message["id"],
                           "ok": True, "result": {}})
-            send(stdout, {"type": "event", "event": "exited",
-                          "params": {"exit_code": 7}})
-            send(stdout, {"type": "event", "event": "terminated",
-                          "params": {}})
+            send(stdout, {"type": "event", "event": "stopped",
+                          "params": {"reason": "entry", "thread_id": 1,
+                                     "all_threads_stopped": True}})
         elif command == "continue":
             send(stdout, {
                 "type": "response", "id": message["id"], "ok": True,
                 "result": {"all_threads_continued": True},
             })
+            if bps and not bp_hit:
+                bp_hit = True
+                gen += 1
+                send(stdout, {
+                    "type": "event", "event": "stopped",
+                    "params": {"reason": "breakpoint", "thread_id": 1,
+                               "all_threads_stopped": True,
+                               "breakpoint_ids": [1]},
+                })
+            else:
+                send(stdout, {"type": "event", "event": "exited",
+                              "params": {"exit_code": 7}})
+                send(stdout, {"type": "event", "event": "terminated",
+                              "params": {}})
         elif command == "threads":
             send(stdout, {
                 "type": "response", "id": message["id"], "ok": True,
@@ -118,6 +135,34 @@ if mode == "lifecycle":
                           "ok": True, "result": {}})
             send(stdout, {"type": "event", "event": "terminated",
                           "params": {}})
+        elif command == "scopes":
+            send(stdout, {
+                "type": "response", "id": message["id"], "ok": True,
+                "result": {"scopes": [
+                    {"name": "Locals",
+                     "variables_reference": gen * 1000 + 1}]},
+            })
+        elif command == "variables":
+            ref = (message.get("params") or {}).get("variables_reference", 0)
+            if ref == gen * 1000 + 1:
+                send(stdout, {
+                    "type": "response", "id": message["id"], "ok": True,
+                    "result": {"variables": [
+                        {"name": "x", "value": "42", "type": "int",
+                         "variables_reference": 0}]},
+                })
+            else:
+                send(stdout, {
+                    "type": "response", "id": message["id"], "ok": False,
+                    "error": {"code": "stale_reference",
+                              "message": f"reference {ref} is stale"},
+                })
+        elif command == "set_breakpoints":
+            bps = True
+            send(stdout, {
+                "type": "response", "id": message["id"], "ok": True,
+                "result": {"breakpoints": [{"line": 5, "verified": True}]},
+            })
         elif command == "shutdown":
             send(stdout, {"type": "response", "id": message["id"],
                           "ok": True, "result": {}})
@@ -269,7 +314,7 @@ def test_dap_request_answers_not_implemented():
         assert reply["request_seq"] == 1
         assert reply["success"] is False
         assert reply["command"] == "evaluate"
-        assert "M2-b2" in reply["message"]
+        assert "M2-c" in reply["message"]
         assert isinstance(reply["seq"], int) and reply["seq"] >= 1
         harness.client.close()  # clean session end
         assert harness.join() == 0
@@ -335,6 +380,15 @@ def _drain_until_response(client: _Client, events: list) -> dict:
         if message.get("type") == "response":
             return message
         events.append(message)
+
+
+def _recv_until_event(client: _Client, name: str) -> dict:
+    """Read frames until the named DAP event arrives; responses in
+    between (e.g. continue's own reply) are skipped."""
+    while True:
+        message = client.recv()
+        if message.get("type") == "event" and message.get("event") == name:
+            return message
 
 
 @pytest.fixture
@@ -419,12 +473,18 @@ def test_launch_response_withheld_until_configuration_done(ktest_file):
         # Ordering invariant: launch response precedes configurationDone.
         assert launch_reply["seq"] < config_reply["seq"]
 
-        # The scripted lifecycle mock ran to exit(7) on configurationDone;
-        # its exited/terminated events follow the responses in order.
-        exited_frame = harness.client.recv()
-        assert exited_frame.get("event") == "exited"
+        # The mock reports the entry stop on configurationDone.
+        stopped_frame = _recv_until_event(harness.client, "stopped")
+        assert stopped_frame["body"]["reason"] == "entry"
+
+        harness.client.send(
+            {"seq": 5, "type": "request", "command": "continue",
+             "arguments": {}}
+        )
+        # No breakpoints set: the scripted run goes to exit(7).
+        exited_frame = _recv_until_event(harness.client, "exited")
         assert exited_frame["body"]["exitCode"] == 7
-        terminated_frame = harness.client.recv()
+        terminated_frame = _recv_until_event(harness.client, "terminated")
         assert terminated_frame.get("event") == "terminated"
 
         harness.client.close()
@@ -519,5 +579,167 @@ def test_threads_stack_trace_continue_terminate_lifecycle(ktest_file):
         reply = _drain_until_response(harness.client, events)
         assert reply["command"] == "terminate" and reply["success"]
 
+        harness.client.close()
+        assert harness.join() == 0
+
+
+def test_scopes_variables_round_trip(ktest_file):
+    """scopes at the reported entry stop → Locals ref → variables."""
+    with running_server("lifecycle") as harness:
+        events: list = []
+        harness.client.send(
+            {"seq": 1, "type": "request", "command": "initialize",
+             "arguments": {}}
+        )
+        _drain_until_response(harness.client, events)
+        harness.client.send(
+            {
+                "seq": 2,
+                "type": "request",
+                "command": "launch",
+                "arguments": {"ktest": ktest_file, "target": sys.executable},
+            }
+        )
+        harness.client.send(
+            {
+                "seq": 3,
+                "type": "request",
+                "command": "configurationDone",
+                "arguments": {},
+            }
+        )
+        launch_reply = _drain_until_response(harness.client, events)
+        assert launch_reply["command"] == "launch"
+        config_reply = _drain_until_response(harness.client, events)
+        assert config_reply["command"] == "configurationDone"
+        stopped_frame = _recv_until_event(harness.client, "stopped")
+        assert stopped_frame["body"]["reason"] == "entry"
+
+        harness.client.send(
+            {"seq": 4, "type": "request", "command": "scopes",
+             "arguments": {"frameId": 0}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        scopes = reply["body"]["scopes"]
+        assert scopes[0]["name"] == "Locals"
+        assert scopes[0]["expensive"] is False
+        ref = scopes[0]["variablesReference"]
+        assert ref == 1001  # generation 1
+
+        harness.client.send(
+            {"seq": 5, "type": "request", "command": "variables",
+             "arguments": {"variablesReference": ref}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        assert reply["body"]["variables"] == [
+            {"name": "x", "value": "42", "type": "int",
+             "variablesReference": 0}
+        ]
+
+        harness.client.send(
+            {"seq": 6, "type": "request", "command": "continue",
+             "arguments": {}}
+        )
+        exited_frame = _recv_until_event(harness.client, "exited")
+        assert exited_frame.get("event") == "exited"
+        harness.client.close()
+        assert harness.join() == 0
+
+
+def test_breakpoint_hit_and_stale_reference(ktest_file):
+    """Decision 12 over the mock: a breakpoint hit starts a new
+    reference generation; pre-hit references go stale with an error,
+    fresh ones resolve."""
+    with running_server("lifecycle") as harness:
+        events: list = []
+        harness.client.send(
+            {"seq": 1, "type": "request", "command": "initialize",
+             "arguments": {}}
+        )
+        _drain_until_response(harness.client, events)
+        harness.client.send(
+            {
+                "seq": 2,
+                "type": "request",
+                "command": "launch",
+                "arguments": {"ktest": ktest_file, "target": sys.executable},
+            }
+        )
+        harness.client.send(
+            {
+                "seq": 3,
+                "type": "request",
+                "command": "configurationDone",
+                "arguments": {},
+            }
+        )
+        launch_reply = _drain_until_response(harness.client, events)
+        assert launch_reply["command"] == "launch"
+        config_reply = _drain_until_response(harness.client, events)
+        assert config_reply["command"] == "configurationDone"
+        stopped_entry = _recv_until_event(harness.client, "stopped")
+        assert stopped_entry["body"]["reason"] == "entry"
+
+        harness.client.send(
+            {
+                "seq": 4,
+                "type": "request",
+                "command": "setBreakpoints",
+                "arguments": {
+                    "source": {"path": "/x/get_sign.c"},
+                    "breakpoints": [{"line": 5}],
+                },
+            }
+        )
+        reply = _drain_until_response(harness.client, events)
+        assert reply["body"]["breakpoints"] == [{"verified": True, "line": 5}]
+
+        # Generation-1 references.
+        harness.client.send(
+            {"seq": 5, "type": "request", "command": "scopes",
+             "arguments": {"frameId": 0}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        old_ref = reply["body"]["scopes"][0]["variablesReference"]
+        assert old_ref == 1001
+
+        harness.client.send(
+            {"seq": 6, "type": "request", "command": "continue",
+             "arguments": {}}
+        )
+        stopped_bp = _recv_until_event(harness.client, "stopped")
+        assert stopped_bp["body"]["reason"] == "breakpoint"
+        assert stopped_bp["body"]["hitBreakpointIds"] == [1]
+
+        # Pre-hit reference: stale — an error, never a mis-read.
+        harness.client.send(
+            {"seq": 7, "type": "request", "command": "variables",
+             "arguments": {"variablesReference": old_ref}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        assert reply["success"] is False
+        assert "stale_reference" in reply["message"]
+
+        # New generation: fresh scopes and variables resolve.
+        harness.client.send(
+            {"seq": 8, "type": "request", "command": "scopes",
+             "arguments": {"frameId": 0}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        new_ref = reply["body"]["scopes"][0]["variablesReference"]
+        assert new_ref == 2001  # generation 2
+        harness.client.send(
+            {"seq": 9, "type": "request", "command": "variables",
+             "arguments": {"variablesReference": new_ref}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        assert reply["body"]["variables"][0]["name"] == "x"
+
+        harness.client.send(
+            {"seq": 10, "type": "request", "command": "continue",
+             "arguments": {}}
+        )
+        exited_frame = _recv_until_event(harness.client, "exited")
+        assert exited_frame.get("event") == "exited"
         harness.client.close()
         assert harness.join() == 0
