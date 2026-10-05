@@ -18,8 +18,11 @@ import sys
 import threading
 from contextlib import contextmanager
 
+import pytest
+
 from symrepl.dap_framing import FrameReader, encode_frame
 from symrepl.dap_server import DapServer, _flushing
+from symrepl.ktest import KTest, dump
 
 _MOCK_CHILD_CODE = r"""
 import json
@@ -57,16 +60,74 @@ def send(stream, payload):
 
 
 mode = sys.argv[1] if len(sys.argv) > 1 else "ok"
+stdin = sys.stdin.buffer
+stdout = sys.stdout.buffer
 
 if mode == "crash":
     sys.exit(1)
-
 if mode == "badversion":
-    send(sys.stdout.buffer, {"type": "hello", "version": 99})
-    sys.stdin.buffer.read()  # block until the shutdown ladder kills us
+    send(stdout, {"type": "hello", "version": 99})
+    stdin.read()  # block until the shutdown ladder kills us
     sys.exit(2)
 
-send(sys.stdout.buffer, {"type": "hello", "version": 1})
+send(stdout, {"type": "hello", "version": 1})
+
+if mode == "lifecycle":
+    # M2-b1 session surface: launch/config_done/continue/threads/
+    # stack_trace/terminate with a scripted run to exit(7).
+    while True:
+        try:
+            message = read_frame(stdin)
+        except EOFError:
+            sys.exit(0)
+        if message.get("type") != "request":
+            continue
+        command = message.get("cmd")
+        if command == "launch":
+            send(stdout, {
+                "type": "response", "id": message["id"], "ok": True,
+                "result": {"pid": 4242},
+            })
+        elif command == "config_done":
+            send(stdout, {"type": "response", "id": message["id"],
+                          "ok": True, "result": {}})
+            send(stdout, {"type": "event", "event": "exited",
+                          "params": {"exit_code": 7}})
+            send(stdout, {"type": "event", "event": "terminated",
+                          "params": {}})
+        elif command == "continue":
+            send(stdout, {
+                "type": "response", "id": message["id"], "ok": True,
+                "result": {"all_threads_continued": True},
+            })
+        elif command == "threads":
+            send(stdout, {
+                "type": "response", "id": message["id"], "ok": True,
+                "result": {"threads": [{"id": 1, "name": "main"}]},
+            })
+        elif command == "stack_trace":
+            send(stdout, {
+                "type": "response", "id": message["id"], "ok": True,
+                "result": {"stack_frames": [
+                    {"id": 0, "name": "main", "line": 3, "column": 5,
+                     "path": "/x/get_sign.c"}],
+                    "total_frames": 1},
+            })
+        elif command == "terminate":
+            send(stdout, {"type": "response", "id": message["id"],
+                          "ok": True, "result": {}})
+            send(stdout, {"type": "event", "event": "terminated",
+                          "params": {}})
+        elif command == "shutdown":
+            send(stdout, {"type": "response", "id": message["id"],
+                          "ok": True, "result": {}})
+            sys.exit(0)
+        else:
+            send(stdout, {
+                "type": "response", "id": message["id"], "ok": False,
+                "error": {"code": "unknown_command", "message": "mock"},
+            })
+
 while True:
     try:
         message = read_frame(sys.stdin.buffer)
@@ -197,16 +258,18 @@ def test_dap_request_answers_not_implemented():
             {
                 "seq": 1,
                 "type": "request",
-                "command": "initialize",
-                "arguments": {"adapterID": "symrepl"},
+                # evaluate/completions stay deferred past M2 (ADR-0003
+                # decision 4) — the honest not-implemented surface.
+                "command": "evaluate",
+                "arguments": {"expression": "1+1", "frameId": 0},
             }
         )
         reply = harness.client.recv()
         assert reply["type"] == "response"
         assert reply["request_seq"] == 1
         assert reply["success"] is False
-        assert reply["command"] == "initialize"
-        assert "M2-b1" in reply["message"]
+        assert reply["command"] == "evaluate"
+        assert "M2-b2" in reply["message"]
         assert isinstance(reply["seq"], int) and reply["seq"] >= 1
         harness.client.close()  # clean session end
         assert harness.join() == 0
@@ -260,3 +323,201 @@ def test_malformed_client_frame_fails_server():
         assert code is not None and code != 0
         child = harness.server.child
         assert child is not None and child.poll() is not None  # ladder reaped
+
+
+# ------------------------------------------- DAP lifecycle (M2-b1, mock) --
+
+
+def _drain_until_response(client: _Client, events: list) -> dict:
+    """Collect event frames until a response arrives; return it."""
+    while True:
+        message = client.recv()
+        if message.get("type") == "response":
+            return message
+        events.append(message)
+
+
+@pytest.fixture
+def ktest_file(tmp_path):
+    """A minimal valid .ktest — the parent validates it at launch."""
+    path = tmp_path / "lifecycle.ktest"
+    path.write_bytes(
+        dump(KTest(version=3, args=(), sym_argvs=0, sym_argv_len=0,
+                   objects=()))
+    )
+    return str(path)
+
+
+def test_initialize_returns_frozen_capabilities():
+    with running_server() as harness:
+        harness.client.send(
+            {
+                "seq": 1,
+                "type": "request",
+                "command": "initialize",
+                "arguments": {"adapterID": "symrepl"},
+            }
+        )
+        reply = harness.client.recv()
+        assert reply["success"] is True
+        assert reply["body"]["supportsConfigurationDoneRequest"] is True
+        assert reply["body"]["supportsTerminateRequest"] is True
+        # Decision 8: supportsTerminateDebuggee stays undeclared.
+        assert "supportsTerminateDebuggee" not in reply["body"]
+        harness.client.close()
+        assert harness.join() == 0
+
+
+def test_launch_response_withheld_until_configuration_done(ktest_file):
+    with running_server("lifecycle") as harness:
+        events: list = []
+        harness.client.send(
+            {
+                "seq": 1,
+                "type": "request",
+                "command": "initialize",
+                "arguments": {},
+            }
+        )
+        reply = _drain_until_response(harness.client, events)
+        assert reply["command"] == "initialize" and reply["success"]
+
+        harness.client.send(
+            {
+                "seq": 2,
+                "type": "request",
+                "command": "launch",
+                "arguments": {"ktest": ktest_file, "target": sys.executable},
+            }
+        )
+        # A probe request proves launch is withheld: the threads answer
+        # comes back first, while launch has produced no response.
+        harness.client.send(
+            {"seq": 3, "type": "request", "command": "threads",
+             "arguments": {}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        assert reply["command"] == "threads" and reply["success"]
+        assert reply["body"]["threads"] == [{"id": 1, "name": "main"}]
+        kinds = [event.get("event") for event in events]
+        assert "process" in kinds and "initialized" in kinds
+
+        harness.client.send(
+            {
+                "seq": 4,
+                "type": "request",
+                "command": "configurationDone",
+                "arguments": {},
+            }
+        )
+        launch_reply = _drain_until_response(harness.client, events)
+        assert launch_reply["command"] == "launch"
+        assert launch_reply["success"] is True
+        config_reply = _drain_until_response(harness.client, events)
+        assert config_reply["command"] == "configurationDone"
+        assert config_reply["success"] is True
+        # Ordering invariant: launch response precedes configurationDone.
+        assert launch_reply["seq"] < config_reply["seq"]
+
+        # The scripted lifecycle mock ran to exit(7) on configurationDone;
+        # its exited/terminated events follow the responses in order.
+        exited_frame = harness.client.recv()
+        assert exited_frame.get("event") == "exited"
+        assert exited_frame["body"]["exitCode"] == 7
+        terminated_frame = harness.client.recv()
+        assert terminated_frame.get("event") == "terminated"
+
+        harness.client.close()
+        assert harness.join() == 0
+
+
+def test_launch_validation_failure_reports_error():
+    with running_server("lifecycle") as harness:
+        harness.client.send(
+            {
+                "seq": 1,
+                "type": "request",
+                "command": "initialize",
+                "arguments": {},
+            }
+        )
+        _drain_until_response(harness.client, [])
+        harness.client.send(
+            {
+                "seq": 2,
+                "type": "request",
+                "command": "launch",
+                "arguments": {"target": sys.executable},  # ktest missing
+            }
+        )
+        events: list = []
+        reply = _drain_until_response(harness.client, events)
+        assert reply["command"] == "launch" and reply["success"] is False
+        assert "ktest" in reply["message"]
+        # The failure happened parent-side: no initialized event leaked.
+        assert not [e for e in events if e.get("event") == "initialized"]
+        harness.client.close()
+        assert harness.join() == 0
+
+
+def test_threads_stack_trace_continue_terminate_lifecycle(ktest_file):
+    with running_server("lifecycle") as harness:
+        events: list = []
+        harness.client.send(
+            {"seq": 1, "type": "request", "command": "initialize",
+             "arguments": {}}
+        )
+        _drain_until_response(harness.client, events)
+        harness.client.send(
+            {
+                "seq": 2,
+                "type": "request",
+                "command": "launch",
+                "arguments": {"ktest": ktest_file, "target": sys.executable},
+            }
+        )
+        harness.client.send(
+            {
+                "seq": 3,
+                "type": "request",
+                "command": "configurationDone",
+                "arguments": {},
+            }
+        )
+        launch_reply = _drain_until_response(harness.client, events)
+        assert launch_reply["command"] == "launch"
+        config_reply = _drain_until_response(harness.client, events)
+        assert config_reply["command"] == "configurationDone"
+
+        harness.client.send(
+            {"seq": 4, "type": "request", "command": "threads",
+             "arguments": {}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        assert reply["body"]["threads"] == [{"id": 1, "name": "main"}]
+
+        harness.client.send(
+            {"seq": 5, "type": "request", "command": "stackTrace",
+             "arguments": {"threadId": 1}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        frames = reply["body"]["stackFrames"]
+        assert frames and frames[0]["name"] == "main"
+
+        harness.client.send(
+            {"seq": 6, "type": "request", "command": "continue",
+             "arguments": {}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        assert reply["body"]["allThreadsContinued"] is True
+
+        # Terminate after the (scripted) exit is idempotent success.
+        harness.client.send(
+            {"seq": 7, "type": "request", "command": "terminate",
+             "arguments": {}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        assert reply["command"] == "terminate" and reply["success"]
+
+        harness.client.close()
+        assert harness.join() == 0
