@@ -1,6 +1,6 @@
 # ADR-0003 — M2 架构：父子拓扑之上的 DAP server
 
-日期：2026-10-04　　状态：已接受（2026-10-04 架构评审；评审发现已并入）
+日期：2026-10-04　　状态：已接受（2026-10-04 架构评审；评审发现已并入；2026-10-05 编辑性修订——决策 7 的轮询原语按 M2-a spike 结论修正，决策不变）
 
 英文版为准（authoritative）。English version:
 [en/adr/0003-m2-dap-server-architecture.md](../en/adr/0003-m2-dap-server-architecture.md)。
@@ -79,11 +79,17 @@ M2 的目标（见 roadmap）：回放会话可被 VS Code 与任何 DAP 客户�
    `stopped(reason: "step")` 表达。
 7. **并发与线程归属**：线程 + 队列 + 每通道单写者（读线程永不写）；
    不上 asyncio（SB API 是阻塞式 C 形态接口）。**子进程内由唯一的
-   owner 线程执行全部 SB API 调用**：LLDB 事件线程以 100–200ms 短轮询
-   跑 `WaitForEvent`，轮询间隙让出处理经队列注入的内部命令；`pause` 用
+   owner 线程执行全部 SB API 调用**：LLDB 事件线程以 `GetNextEvent`
+   加短暂 sleep 短轮询，轮询间隙让出处理经队列注入的内部命令
+   （2026-10-05 编辑性修订：Python 的 `WaitForEvent` 绑定只接受整秒数，
+   亚秒级 `WaitForEvent` 轮询无法表达）；`pause` 用
    `process.SendAsyncInterrupt()`。父进程跑客户端读线程与子进程事件
-   读线程，由主循环多路复用。**M2-a 含一个 spike**：在 service 形态的
-   子进程里验证 `SendAsyncInterrupt` 真实可用，先于骨架落地。
+   读线程，由主循环多路复用。**M2-a spike 已完成**（2026-10-05，
+   LLDB 22.1.8）：service 形态子进程内 `SendAsyncInterrupt` 验证通过
+   ——两次中断都产生真实停止（停止事件送达会话 listener、PC 落在
+   target 内、可恢复、可重复），并确立两条服务循环附加规则：每次恢复
+   运行前必须先排干队列中的陈旧事件（如 entry stop）；启动前须经 M1
+   的 `_ensure_debug_server()` 辅助定位 `lldb-server`。
 8. **生命周期与故障语义**（关机阶梯）：
    - 子进程监视自身 **stdin**：EOF 即杀死 inferior 并退出——这是对
      父进程被 SIGKILL 也可靠的唯一信号。

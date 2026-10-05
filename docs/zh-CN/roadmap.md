@@ -37,22 +37,76 @@
 mock-debug 的 DAP 子集；分支追踪经 `stopOnBranch` 与自定义请求
 `replay.branchTrace`）。
 
-切片：
+实施映射（2026-10-05 规划定稿）：
 
-- **M2-a 骨架** — DAP framing（标准库，拆帧/粘包单测）、说内部协议的
-  service 化子进程（版本化握手）、`symrepl dap` 入口（stdio +
-  `--port`）、stdio 卫生、生命周期/故障语义（stdin-EOF 自杀、关机
-  阶梯）、mock child 测试、`SendAsyncInterrupt` spike。
-- **M2-b1 DAP 生命周期** — initialize/launch/configurationDone、
-  threads/stackTrace/continue、terminate/disconnect（含运行中
-  disconnect）；手写 Python 测试客户端。
-- **M2-b2 状态面** — scopes/variables（按停止点的引用代际）、源码断点。
-- **M2-c 分支追踪上 DAP** — 分支站点断点、`stopOnBranch`、
-  `replay.branchTrace`、经 `output` 的会话末尾跟踪报告、inferior 输出
-  转发。
-- **M2-d stepping** — next/stepIn/stepOut/pause。
+- **原样复用**：`branches.py`、`trace.py`（`TraceReport.render()` 即
+  output 事件推送的内容）、`ktest.py`（父进程校验，使用用户原始路径
+  —— ADR-0003 决策 11）、`lldb_driver.py` 中的 LLDB 引导辅助与
+  `_collect_sites`、inferior stdio 落盘模式（子进程自身 stdout 目前
+  空闲，将用作协议通道）、`get_sign_bin` 夹具。
+- **拆解改造**：`session_run` 内核改为交互式会话循环——entry stop
+  后挂起等待内部命令而非跑完即退，`SBDebugger.Terminate()` 移至子进程
+  退出时。每个 DAP 会话一个子进程：即 M1 隔离契约，把生命周期从
+  "一次回放"延长为"一个会话"（每进程仍恰好一次 Initialize、一次
+  launch）。
+- **保留不动**：一次性 CLI 回放路径（`replay.py` +
+  `lldb_driver.run()`）；DAP 只增加传输层，不引入新语义。
+- **新建**：`dap_framing.py`（约 40 行标准库）、`lldb_service.py`
+  （常驻子进程）、父进程 DAP server、仅开发用的 DAP 测试客户端。
+
+切片——严格线性（每片依赖前一片的协议面）；分帧单测、测试客户端、
+扩展清单骨架可提前并行：
+
+- **M2-a 骨架** — `SendAsyncInterrupt` spike **已通过**（2026-10-05，
+  LLDB 22.1.8，`scripts/spike_send_async_interrupt.py`）：`pause` 路线
+  确认可行；spike 同时钉死服务循环的事件原语——`GetNextEvent` 加短暂
+  sleep（`WaitForEvent` 绑定只接受整秒数）——以及两条附加规则：每次
+  恢复前先排干队列、启动前经 `_ensure_debug_server()` 定位
+  `lldb-server`。随后：分帧模块（按 encoded-byte 计数、64 MiB 上限、
+  畸形帧杀会话；拆帧/粘包单测）、`lldb_service.py`（版本化 `hello`
+  握手、ok/error envelope、stdin-EOF 自杀、单 owner LLDB 线程以
+  `GetNextEvent` 短轮询加命令队列；stdio 卫生在最早入口完成——协议
+  通道独占 stdout，stderr 重定向到文件，LLDB 日志不进 fd 1）、父进程
+  server（stdio + `--port`、单写者输出队列、关机阶梯）、`symrepl dap`
+  子命令（裸回放 CLI 及退出码不变）、mock child 测试。**验收**：
+  stdio 与 socket 双模式完成握手；畸形帧杀会话；stdin EOF 或父进程
+  SIGKILL → 子进程自杀。
+- **M2-b1 DAP 生命周期** — initialize/launch/configurationDone
+  （launch 响应扣留）、threads/stackTrace/continue、terminate/
+  disconnect（含运行中 disconnect）；launch 参数 schema 冻结（ktest、
+  target、stopOnBranch、stopOnEntry、scope、timeout），ktest 由父进程
+  校验。**验收**：手写测试客户端在 socket 模式下跑通完整
+  initialize→launch→运行→退出会话；运行中 disconnect 不留孤儿
+  inferior 或子进程。
+- **M2-b2 状态面** — scopes/variables 按停止点引用代际（resume 即
+  失效；stale 引用回错误）、源码断点。**验收**：停止点可读变量；
+  continue 后 stale 引用报错；断点命中并上报。
+- **M2-c 分支追踪上 DAP** — 分支站点断点、`stopOnBranch`（`stopped`，
+  reason `breakpoint`）、`replay.branchTrace`、会话末尾经 `output`
+  推送 `TraceReport.render()`、inferior 输出转发（可丢弃有界队列加
+  截断标记；控制事件永不丢弃）。**验收**：默认 M1 平价——同一夹具上
+  DAP 报告与 CLI 轨迹一致；`stopOnBranch` 在每个站点暴露活变量。
+- **M2-d stepping** — next/stepIn/stepOut/pause 映射到 SBThread step
+  操作（`pause` 用 `SendAsyncInterrupt`），完成以
+  `stopped(reason: "step")` 报告；交互态无全局超时。**验收**：每种
+  单步都在夹具的预期函数内停住。
 - **M2-e 收尾** — 声明式 VS Code 扩展（零代码）、en/zh 文档、DAP 验收
-  场景、混沌测试（子进程崩溃、畸形帧）。
+  场景（acceptance.sh 风格）、混沌测试（子进程中途崩溃、畸形帧、
+  客户端中途断连）、LLDB smoke path。**验收**：完整闭环可从 VS Code
+  经 `"debugServer"` 跑通；混沌测试以 `terminated` 干净失败，绝不
+  挂死。
+
+已知风险（2026-10-05 规划定稿）：
+
+- **stdio 卫生**是最锋利的边界：任何库或 LLDB 内部对 fd 1 的杂散写入
+  都会破坏分帧；重定向必须在最早入口完成，LLDB 日志路由需要显式
+  测试。
+- **输出顺序不变量**（`continue` 响应先于其引发的 `stopped` 事件）由
+  单写者队列结构性保证，但需要专门的字节序测试钉死。
+- **背压分裂**（可丢弃的 `output` vs 永不丢弃的控制事件）必须是两个
+  显式队列类别，不能事后过滤。
+- **一次性 CLI 路径保持冻结**；把它迁移到 service 子进程明确不在 M2
+  范围内（M3 再评估）。
 
 ## M3 — LLVM IR / DWARF 映射
 

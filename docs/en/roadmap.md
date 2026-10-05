@@ -41,25 +41,91 @@ Architecture contract: [ADR-0003](adr/0003-m2-dap-server-architecture.md)
 mock-debug-aligned DAP subset; branch tracing via `stopOnBranch` and the
 `replay.branchTrace` custom request).
 
-Slices:
+Implementation mapping (planning pass 2026-10-05):
 
-- **M2-a skeleton** — DAP framing (stdlib, unit-tested for frame
-  coalescing), service-ified child speaking the internal protocol
-  (versioned handshake), `symrepl dap` entry (stdio + `--port`), stdio
-  hygiene, lifecycle/failure semantics (stdin-EOF suicide, shutdown
-  ladder), mock-child tests, and a `SendAsyncInterrupt` spike.
-- **M2-b1 DAP lifecycle** — initialize/launch/configurationDone,
-  threads/stackTrace/continue, terminate/disconnect (including
-  disconnect-while-running); hand-written Python test client.
-- **M2-b2 state surface** — scopes/variables (per-stop reference
-  generation), source breakpoints.
+- **Reused verbatim**: `branches.py`, `trace.py` (`TraceReport.render()`
+  becomes the output-event push), `ktest.py` (parent-side validation,
+  user's original path — ADR-0003 decision 11), the LLDB bootstrap
+  helpers and `_collect_sites` in `lldb_driver.py`, the file-redirected
+  inferior stdio (the child's own stdout is idle today and becomes the
+  protocol channel), and the `get_sign_bin` fixture.
+- **Restructured**: the `session_run` kernel becomes the interactive
+  session loop — the entry stop waits on internal commands instead of
+  running to exit, and `SBDebugger.Terminate()` moves to child exit.
+  One child process per DAP session: the M1 isolation contract with the
+  lifetime extended from "one replay" to "one session" (still exactly
+  one Initialize and one launch per process).
+- **Untouched**: the one-shot CLI replay path (`replay.py` +
+  `lldb_driver.run()`); DAP adds a transport, not new semantics.
+- **New**: `dap_framing.py` (~40 lines of stdlib), `lldb_service.py`
+  (the long-lived child), the parent DAP server, and a dev-only DAP
+  test client.
+
+Slices — strictly linear (each builds on the previous protocol
+surface); the framing unit tests, the test client, and the extension
+manifest skeleton may be pulled ahead:
+
+- **M2-a skeleton** — the `SendAsyncInterrupt` spike **passed**
+  (2026-10-05, LLDB 22.1.8, `scripts/spike_send_async_interrupt.py`):
+  `pause` is confirmed viable; the spike also pinned the service-loop
+  event primitive — `GetNextEvent` plus a short sleep, since the
+  `WaitForEvent` binding only accepts whole seconds — plus
+  drain-before-every-resume and `_ensure_debug_server()` before launch.
+  Then: the framing module (encoded-byte counting, 64 MiB cap,
+  malformed frame kills the session; unit-tested for
+  splitting/coalescing), `lldb_service.py` (versioned `hello`
+  handshake, ok/error envelope, stdin-EOF suicide, single-owner LLDB
+  thread with a `GetNextEvent` short poll plus a command queue; stdio
+  hygiene at the earliest entry — protocol channel owns stdout, stderr
+  redirected to a file, LLDB logging kept off fd 1), the parent server
+  (stdio + `--port`, single-writer output queue, shutdown ladder), a
+  `symrepl dap` subcommand (bare-replay CLI and its exit codes
+  unchanged), and mock-child tests. **Accept**: handshake over stdio
+  and socket; malformed frame kills the session; stdin EOF or parent
+  SIGKILL → child self-terminates.
+- **M2-b1 DAP lifecycle** — initialize/launch/configurationDone (the
+  launch response withheld), threads/stackTrace/continue,
+  terminate/disconnect (including disconnect-while-running); the frozen
+  launch schema (ktest, target, stopOnBranch, stopOnEntry, scope,
+  timeout) with parent-side ktest validation. **Accept**: a full
+  initialize→launch→run→exit session driven by the hand-written test
+  client in socket mode; disconnect while running leaves no orphan
+  inferior or child.
+- **M2-b2 state surface** — scopes/variables with per-stop generation
+  ids (resume invalidates; stale references error), source breakpoints.
+  **Accept**: variables readable at a stop; stale-reference error after
+  continue; breakpoints hit and reported.
 - **M2-c branch tracing over DAP** — branch-site breakpoints,
-  `stopOnBranch`, `replay.branchTrace`, end-of-session trace report
-  via `output`, inferior output forwarding.
-- **M2-d stepping** — next/stepIn/stepOut/pause.
+  `stopOnBranch` (`stopped`, reason `breakpoint`), `replay.branchTrace`,
+  end-of-session `TraceReport.render()` push via `output`, inferior
+  output forwarding (droppable bounded queue with a truncation marker;
+  control events never dropped). **Accept**: default M1 parity — the
+  DAP report matches the CLI trace on the same fixture; `stopOnBranch`
+  exposes live variables at each site.
+- **M2-d stepping** — next/stepIn/stepOut/pause mapped to SBThread step
+  operations (+ `SendAsyncInterrupt` for `pause`), completion reported
+  as `stopped(reason: "step")`; no global interactive timeout.
+  **Accept**: each step kind stops within the expected function on the
+  fixture.
 - **M2-e wrap-up** — declarative VS Code extension (zero-code), en/zh
-  docs, DAP acceptance scenario, chaos tests (child crash, malformed
-  frames).
+  docs, DAP acceptance scenario (acceptance.sh style), chaos tests
+  (child crash mid-session, malformed frames, client EOF mid-run), and
+  an LLDB smoke path. **Accept**: the full loop runs from VS Code via
+  `"debugServer"`; chaos tests fail cleanly with `terminated`, never a
+  hang.
+
+Known risks (planning pass 2026-10-05):
+
+- **stdio hygiene** is the sharpest edge: any stray write to fd 1 from
+  a library or LLDB internals corrupts framing; the redirect must run
+  at the earliest entry, and LLDB log routing needs an explicit test.
+- **Output ordering invariant** (`continue` response before its
+  `stopped` event) is enforced structurally by the single-writer queue,
+  but pinned by a dedicated byte-order test.
+- **Backpressure split** (droppable `output` vs never-dropped control
+  events) must be two explicit queue classes, not post-hoc filtering.
+- **The one-shot CLI path stays frozen**; migrating it onto the service
+  child is explicitly out of M2 scope (revisit at M3).
 
 ## M3 — LLVM IR / DWARF mapping
 

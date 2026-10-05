@@ -1,6 +1,6 @@
 # ADR-0003 — M2 architecture: DAP server over the parent–child topology
 
-Date: 2026-10-04　　Status: Accepted (architectural review 2026-10-04; findings incorporated)
+Date: 2026-10-04　　Status: Accepted (architectural review 2026-10-04; findings incorporated; editorially revised 2026-10-05 — decision 7's polling primitive corrected per the M2-a spike; decision unchanged)
 
 English version is authoritative. 简体中文见
 [zh-CN/adr/0003-m2-dap-server-architecture.md](../../zh-CN/adr/0003-m2-dap-server-architecture.md)。
@@ -100,12 +100,20 @@ client. Research against the DAP specification, `lldb-dap`,
    writer per channel (reader threads never write); no asyncio (the
    SB API is a blocking C-shaped surface). **Inside the child, one
    single-owner thread executes all SB API calls**: the LLDB event
-   thread runs `WaitForEvent` as a 100–200 ms short poll, yielding to
-   internal commands injected through a queue; `pause` uses
+   thread short-polls via `GetNextEvent` plus a short sleep, yielding
+   to internal commands injected through a queue (editorially
+   corrected 2026-10-05: the Python `WaitForEvent` binding accepts
+   only a whole number of seconds, so a sub-second `WaitForEvent`
+   poll is not expressible); `pause` uses
    `process.SendAsyncInterrupt()`. The parent runs a client-reader
    thread and a child-event reader thread, multiplexed by the main
-   loop. An **M2-a spike** validates `SendAsyncInterrupt` in the
-   service-form child before the skeleton lands.
+   loop. The **M2-a spike** (2026-10-05, LLDB 22.1.8) validated
+   `SendAsyncInterrupt` in the service-form child — both interrupts
+   produced a real stop (stop event delivered to the session listener,
+   PC inside the target, resumable, repeatable) — and established two
+   further service-loop rules: queued stale events (the entry stop)
+   must be drained before every resume, and `lldb-server` must be
+   located via the M1 `_ensure_debug_server()` helper before launch.
 8. **Lifecycle & failure semantics** (the shutdown ladder):
    - The child watches its **stdin**: on EOF it kills the inferior and
      exits — the only parent-death signal reliable against SIGKILL.
