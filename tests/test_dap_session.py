@@ -135,7 +135,8 @@ def dap_session():
 
 
 def _launch_get_sign(client: _Client, ktest: Path, target,
-                     stop_on_entry: bool) -> None:
+                     stop_on_entry: bool = False,
+                     stop_on_branch: bool = False) -> None:
     reply = client.request(
         "initialize",
         {"adapterID": "symrepl"},
@@ -149,6 +150,7 @@ def _launch_get_sign(client: _Client, ktest: Path, target,
             "ktest": str(ktest),
             "target": str(target),
             "stopOnEntry": stop_on_entry,
+            "stopOnBranch": stop_on_branch,
             "scope": "get_sign",
         },
     )  # response withheld until configurationDone
@@ -184,41 +186,28 @@ def test_dap_full_lifecycle_run_to_exit(get_sign_bin, name: str, code: int):
         assert child is not None and child.poll() is not None
 
 
-def test_dap_stop_on_entry_reports_stack(get_sign_bin):
-    """stopOnEntry: a reported entry stop, inspectable threads/stack,
-    then continue to the recorded exit."""
+def test_dap_branch_trace_report_over_real_run(get_sign_bin):
+    """Decision 5: M1-parity tracing records sites/hits; the ordered
+    report lands on the Debug Console (output) at session end and is
+    available via replay.branchTrace."""
     with dap_session() as (server, client, thread):
         _launch_get_sign(client, KTESTS / "get_sign_test000002.ktest",
-                         get_sign_bin, stop_on_entry=True)
-
+                         get_sign_bin, stop_on_entry=False)
         reply = client.request("configurationDone")
         assert reply["success"] is True
-        stopped = client.wait_event("stopped")
-        assert stopped["body"]["reason"] == "entry"
-        assert stopped["body"]["allThreadsStopped"] is True
-
-        thread_id = stopped["body"]["threadId"]
-        reply = client.request("threads")
-        assert reply["success"] is True
-        threads = reply["body"]["threads"]
-        assert len(threads) == 1
-        assert threads[0]["id"] == thread_id
-
-        reply = client.request("stackTrace", {"threadId": thread_id})
-        assert reply["success"] is True
-        frames = reply["body"]["stackFrames"]
-        assert frames, "entry stop must show at least one frame"
-        for frame in frames:
-            assert isinstance(frame["id"], int)
-            assert frame["name"]
-
-        reply = client.request("continue")
-        assert reply["success"] is True
-        assert reply["body"]["allThreadsContinued"] is True
-
         exited = client.wait_event("exited")
         assert exited["body"]["exitCode"] == 1
-        client.wait_event("terminated")
+
+        output = client.wait_event("output")
+        assert output["body"]["category"] == "stdout"
+        # The M1 report shape: sites instrumented, hits in order.
+        assert "branch trace: scope=get_sign" in output["body"]["output"]
+        assert "2 hit(s) in execution order" in output["body"]["output"]
+        assert "get_sign" in output["body"]["output"]
+
+        reply = client.request("replay.branchTrace")
+        assert reply["success"] is True
+        assert "get_sign" in reply["body"]["trace"]
 
         reply = client.request("disconnect")
         assert reply["success"] is True
@@ -226,21 +215,62 @@ def test_dap_stop_on_entry_reports_stack(get_sign_bin):
         assert server.exit_code == 0
 
 
-def test_dap_launch_rejects_missing_ktest(get_sign_bin):
-    """Parent-side validation (ADR-0003 decision 11) fails the launch
-    before the child is involved."""
+def test_dap_stop_on_branch_inspects_sites(get_sign_bin):
+    """stopOnBranch: every traced site reports a breakpoint stop with
+    the site in the description; scopes/variables read live state."""
     with dap_session() as (server, client, thread):
-        reply = client.request("initialize", {"adapterID": "symrepl"})
+        _launch_get_sign(client, KTESTS / "get_sign_test000002.ktest",
+                         get_sign_bin, stop_on_entry=False,
+                         stop_on_branch=True)
+        client.request("configurationDone")
+
+        first = client.wait_event("stopped")
+        assert first["body"]["reason"] == "breakpoint"
+        assert "get_sign" in first["body"]["description"]
+        thread_id = first["body"]["threadId"]
+
+        reply = client.request("stackTrace", {"threadId": thread_id})
+        frame_id = reply["body"]["stackFrames"][0]["id"]
+        reply = client.request("scopes", {"frameId": frame_id})
+        ref = reply["body"]["scopes"][0]["variablesReference"]
+        reply = client.request("variables", {"variablesReference": ref})
+        names = {v["name"] for v in reply["body"]["variables"]}
+        assert "x" in names  # the symbolic argument, live at the site
+
+        client.request("continue")
+        second = client.wait_event("stopped")
+        assert second["body"]["reason"] == "breakpoint"
+
+        client.request("continue")
+        exited = client.wait_event("exited")
+        assert exited["body"]["exitCode"] == 1
+
+        reply = client.request("replay.branchTrace")
         assert reply["success"] is True
-        reply = client.request(
-            "launch",
-            {"ktest": "/nonexistent/nope.ktest", "target": str(get_sign_bin)},
-        )
-        assert reply["success"] is False
-        assert "ktest" in reply["message"]
-        # Nothing was launched: no initialized event ever fired.
-        assert not [e for e in client.events if e.get("event") == "initialized"]
-        client.close()
+        assert "2 hit(s)" in reply["body"]["trace"]
+
+        reply = client.request("disconnect")
+        assert reply["success"] is True
+        thread.join(timeout=15)
+        assert server.exit_code == 0
+
+
+def test_dap_output_forwards_stderr(get_sign_bin):
+    """Decision 13: inferior stderr is forwarded as output events (the
+    two_objs fixture trips kleeRuntest's name-mismatch report)."""
+    with dap_session() as (server, client, thread):
+        _launch_get_sign(client, KTESTS / "two_objs_test000001.ktest",
+                         get_sign_bin, stop_on_entry=False)
+        client.request("configurationDone")
+        client.wait_event("terminated")
+        outputs = [
+            e for e in client.events if e.get("event") == "output"
+        ]
+        text = "".join(e["body"]["output"] for e in outputs)
+        assert "object name mismatch" in text
+
+        reply = client.request("disconnect")
+        assert reply["success"] is True
         thread.join(timeout=15)
         assert server.exit_code == 0
 

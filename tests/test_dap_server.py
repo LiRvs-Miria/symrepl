@@ -95,6 +95,9 @@ if mode == "lifecycle":
         elif command == "config_done":
             send(stdout, {"type": "response", "id": message["id"],
                           "ok": True, "result": {}})
+            send(stdout, {"type": "event", "event": "output",
+                          "params": {"category": "stderr",
+                                     "text": "mock inferior wrote this"}})
             send(stdout, {"type": "event", "event": "stopped",
                           "params": {"reason": "entry", "thread_id": 1,
                                      "all_threads_stopped": True}})
@@ -135,6 +138,13 @@ if mode == "lifecycle":
                           "ok": True, "result": {}})
             send(stdout, {"type": "event", "event": "terminated",
                           "params": {}})
+        elif command == "branch_trace":
+            send(stdout, {
+                "type": "response", "id": message["id"], "ok": True,
+                "result": {"trace": "branch trace: scope=get_sign, "
+                                    "2 conditional site(s) instrumented, "
+                                    "2 hit(s) in execution order (mock)"},
+            })
         elif command == "scopes":
             send(stdout, {
                 "type": "response", "id": message["id"], "ok": True,
@@ -314,7 +324,7 @@ def test_dap_request_answers_not_implemented():
         assert reply["request_seq"] == 1
         assert reply["success"] is False
         assert reply["command"] == "evaluate"
-        assert "M2-c" in reply["message"]
+        assert "M2-d" in reply["message"]
         assert isinstance(reply["seq"], int) and reply["seq"] >= 1
         harness.client.close()  # clean session end
         assert harness.join() == 0
