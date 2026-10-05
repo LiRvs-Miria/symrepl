@@ -64,10 +64,12 @@ from ptrfuzz M2, symrepl becomes a library dependency.
 
 ## Status
 
-Pre-MVP: scaffolding only. See the [roadmap](docs/en/roadmap.md) — M1
-(ktest replay under LLDB) is next.
+M1 (ktest replay under LLDB) is done — see the
+[roadmap](docs/en/roadmap.md). M2 (DAP server mode) is next; its
+architecture contract is
+[ADR-0003](docs/en/adr/0003-m2-dap-server-architecture.md).
 
-## Requirements (planned)
+## Requirements
 
 - LLDB with Python scripting support
 - Python >= 3.10

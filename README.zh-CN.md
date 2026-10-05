@@ -54,10 +54,11 @@ ptrfuzz 之于 symrepl，如同 Clang 之于 LLVM：从 ptrfuzz M2 起，symrepl
 
 ## 状态
 
-Pre-MVP：仅脚手架。路线图见 [docs/roadmap.md](docs/zh-CN/roadmap.md)——下一步是
-M1（在 LLDB 下回放 ktest）。
+M1（在 LLDB 下回放 ktest）已完成——路线图见
+[docs/roadmap.md](docs/zh-CN/roadmap.md)。下一步是 M2（DAP server 模式），
+架构契约见 [ADR-0003](docs/zh-CN/adr/0003-m2-dap-server-architecture.md)。
 
-## 计划中的依赖
+## 运行要求
 
 - 带脚本支持的 LLDB（Python API）
 - Python >= 3.10
