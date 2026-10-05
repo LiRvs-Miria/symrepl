@@ -25,6 +25,14 @@ States: ``entry`` → ``entry_stopped`` (silent, awaiting
 configurationDone) → ``running`` ↔ ``stopped`` → ``dead``; a launch
 argument of ``stopOnEntry`` turns the post-configurationDone stop into
 a reported ``stopped(reason: "entry")`` instead of a resume.
+
+M2-b2 adds the state surface: scopes/variables over a stopped frame
+and source breakpoints (create/replace per DAP semantics, hits
+reported via ``stopped(reason: "breakpoint")``).  References are
+**per-stop generation ids** (ADR-0003 decision 12): every reported
+stop and every resume starts a new generation; frame ids embed the
+generation, variable references are registered against it, and stale
+ids fail with a ``stale_reference`` error instead of mis-resolving.
 """
 
 from __future__ import annotations
@@ -77,6 +85,11 @@ class LldbSession:
         self._terminal_emitted = False
         self._io_dir = tempfile.TemporaryDirectory(prefix="symrepl-session-")
         self._closed = False
+        # Per-stop reference generations (ADR-0003 decision 12).
+        self._generation = 0
+        self._var_refs: dict[int, tuple[int, int]] = {}  # ref → (gen, frame)
+        self._ref_counter = 0
+        self._own_breakpoint_ids: list[int] = []
 
     # ------------------------------------------------------------ state --
 
@@ -187,6 +200,7 @@ class LldbSession:
             "entry_stopped", code="not_launched", action="finish configuration"
         )
         if self._stop_on_entry:
+            self._begin_reported_stop()
             self._phase = "stopped"
             return [self._stopped_event("entry")]
         self._resume()
@@ -206,8 +220,18 @@ class LldbSession:
         event = self._lldb.SBEvent()
         while self._listener.GetNextEvent(event):
             pass
+        # Decision 12: any resume invalidates the current reference
+        # generation — stale ids must error, never mis-resolve.
+        self._generation += 1
+        self._var_refs.clear()
         self._process.Continue()  # async: returns immediately
         self._phase = "running"
+
+    def _begin_reported_stop(self) -> None:
+        """A user-visible stop starts a fresh reference generation
+        (ADR-0003 decision 12)."""
+        self._generation += 1
+        self._var_refs.clear()
 
     def threads(self) -> list[dict]:
         """The (single) thread of the inferior, by harness contract."""
@@ -250,7 +274,9 @@ class LldbSession:
                     path = filespec.fullpath or filespec.GetFilename() or ""
             frames.append(
                 {
-                    "id": index,
+                    # Frame ids carry the generation (decision 12): a
+                    # resume invalidates them along with variable refs.
+                    "id": self._generation * 1000 + index,
                     "name": name,
                     "line": line,
                     "column": column,
@@ -258,6 +284,125 @@ class LldbSession:
                 }
             )
         return {"stack_frames": frames, "total_frames": thread.GetNumFrames()}
+
+    # ------------------------------------------------- state surface --
+
+    def scopes(self, frame_id: int) -> list[dict]:
+        """Variable scopes of one frame; requires a reported stop."""
+        self._require_phase(
+            "stopped", code="not_stopped", action="read scopes"
+        )
+        generation, frame_index = self._decode_frame_id(frame_id)
+        self._frame_at(frame_index)  # validates the frame exists
+        ref = self._new_reference(generation)
+        self._var_refs[ref] = (generation, frame_index)
+        return [{"name": "Locals", "variables_reference": ref}]
+
+    def variables(self, variables_reference: int) -> list[dict]:
+        """The variables behind a scope reference; requires a reported
+        stop and a reference from the current generation."""
+        self._require_phase(
+            "stopped", code="not_stopped", action="read variables"
+        )
+        _, frame_index = self._decode_reference(variables_reference)
+        frame = self._frame_at(frame_index)
+        variables = []
+        for value in frame.GetVariables(True, True, False, True):
+            variables.append(
+                {
+                    "name": value.GetName() or "<unnamed>",
+                    "value": value.GetValue() or value.GetSummary() or "",
+                    "type": value.GetTypeName() or "",
+                    "variables_reference": 0,  # flat surface: no children
+                }
+            )
+        return variables
+
+    def set_breakpoints(self, path: str, lines: list[int]) -> dict:
+        """Replace the breakpoints of one source file (DAP semantics:
+        setBreakpoints is a full replacement per source).  Creation
+        works on a launched target, stopped or running."""
+        if self._process is None:
+            raise SessionError(
+                "not_launched", "no session to place breakpoints in"
+            )
+        if not isinstance(path, str) or not path:
+            raise SessionError("bad_request", "source path must be a string")
+        for bp_id in self._own_breakpoint_ids:
+            self._target.BreakpointDelete(bp_id)
+        self._own_breakpoint_ids = []
+        breakpoints = []
+        for line in lines:
+            if (
+                not isinstance(line, int)
+                or isinstance(line, bool)
+                or line < 1
+            ):
+                raise SessionError(
+                    "bad_request", f"invalid breakpoint line: {line!r}"
+                )
+            bp = self._target.BreakpointCreateByLocation(path, line)
+            if not bp.IsValid():
+                breakpoints.append({"line": line, "verified": False})
+                continue
+            self._own_breakpoint_ids.append(int(bp.GetID()))
+            resolved = line
+            if bp.GetNumLocations() > 0:
+                # SBBreakpointLocation has no GetLineInfo; the resolved
+                # line comes through the location's address.
+                address = bp.GetLocationAtIndex(0).GetAddress()
+                if address.IsValid():
+                    entry = address.GetLineEntry()
+                    if entry.IsValid():
+                        resolved = int(entry.GetLine())
+            breakpoints.append({"line": resolved, "verified": True})
+        return {"breakpoints": breakpoints}
+
+    def _decode_frame_id(self, frame_id: int) -> tuple[int, int]:
+        if (
+            not isinstance(frame_id, int)
+            or isinstance(frame_id, bool)
+            or frame_id < 0
+        ):
+            raise SessionError(
+                "bad_request", "frameId must be a non-negative integer"
+            )
+        generation, frame_index = divmod(frame_id, 1000)
+        if generation != self._generation:
+            raise SessionError(
+                "stale_reference",
+                f"frame id from generation {generation}, "
+                f"current generation is {self._generation}",
+            )
+        return generation, frame_index
+
+    def _decode_reference(self, ref: int) -> tuple[int, int]:
+        if not isinstance(ref, int) or isinstance(ref, bool):
+            raise SessionError(
+                "bad_request", "variablesReference must be an integer"
+            )
+        entry = self._var_refs.get(ref)
+        if entry is None or entry[0] != self._generation:
+            raise SessionError(
+                "stale_reference",
+                f"variables reference {ref} is not from the current stop",
+            )
+        return entry
+
+    def _new_reference(self, generation: int) -> int:
+        self._ref_counter += 1
+        return generation * 100000 + self._ref_counter
+
+    def _frame_at(self, frame_index: int):
+        process = self._process
+        thread = process.GetThreadAtIndex(0)
+        if (
+            thread is None
+            or not thread.IsValid()
+            or frame_index >= thread.GetNumFrames()
+        ):
+            raise SessionError("no_frame", f"no frame {frame_index}")
+        return thread.GetFrameAtIndex(frame_index)
 
     def terminate(self) -> list[dict]:
         """Kill the inferior now; the ``terminated`` event arrives via
@@ -352,9 +497,11 @@ class LldbSession:
         return thread
 
     def _crash_or_stop_event(self) -> dict:
+        self._begin_reported_stop()
         thread = self._stopped_thread()
         reason = "exception"
         description = ""
+        breakpoint_ids: list[int] = []
         if thread is not None and thread.IsValid():
             raw = int(thread.GetStopReason())
             exceptions = (
@@ -362,7 +509,11 @@ class LldbSession:
                 self._lldb.eStopReasonException,
             )
             if raw == int(self._lldb.eStopReasonBreakpoint):
-                reason = "breakpoint"  # M2-b2/M2-c surfaces these
+                reason = "breakpoint"
+                breakpoint_ids = [
+                    int(thread.GetStopReasonDataAtIndex(i))
+                    for i in range(thread.GetStopReasonDataCount())
+                ]
             elif raw == int(self._lldb.eStopReasonTrace):
                 reason = "step"  # M2-d surfaces these
             elif raw not in exceptions:
@@ -373,6 +524,8 @@ class LldbSession:
             "thread_id": int(thread.GetThreadID()) if thread is not None else 0,
             "all_threads_stopped": True,
         }
+        if breakpoint_ids:
+            params["breakpoint_ids"] = breakpoint_ids
         if description:
             params["description"] = description
         return {"event": "stopped", "params": params}
