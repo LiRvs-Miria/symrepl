@@ -6,14 +6,13 @@ connection (``--port``), and drives one long-lived
 ``symrepl.lldb_service`` child per session over the internal framed
 protocol.
 
-M2-a scope: transport, the child lifecycle (shutdown ladder, decision
-8), and the single-writer output ordering invariant (decision 4: all
-client-bound frames are written by the run loop, so their order on the
-wire is authoritative).  Every DAP request gets an honest
-``success: false`` "not implemented until M2-b1" response — request
-semantics (initialize/launch/...) land with M2-b1, as does the
-translation of a mid-session child death into a ``terminated`` event;
-in M2-a that death simply fails the server with a nonzero exit.
+M2-b1 implements the lifecycle surface on that transport: initialize
+(capabilities frozen per decision 4), launch (response withheld until
+configurationDone), threads/stackTrace/continue, and
+terminate/disconnect (always kill, decision 8).  Anything else still
+answers ``success: false`` "not implemented until M2-b2"; DAP event
+semantics for child death (``terminated`` translation) are live as of
+M2-b1.
 
 Threads (decision 7): a client-reader and a child-reader pump frames
 into one tagged event queue; the run loop (single owner) multiplexes
@@ -38,6 +37,7 @@ import threading
 from collections.abc import Callable
 
 from .dap_framing import FrameReader, FramingError, encode_frame
+from .ktest import KTestError, load as _load_ktest
 
 _PROTOCOL_VERSION = 1
 
@@ -59,6 +59,16 @@ class _PendingRequest:
         self.ok = False
         self.result: dict | None = None
         self.error: dict | None = None
+
+
+class _ChildRequestError(RuntimeError):
+    """The service child answered an internal request with an error
+    envelope; ``code`` stays machine-readable for the caller."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code = code
+        self.message = message
 
 
 class DapServer:
@@ -85,6 +95,21 @@ class DapServer:
         self._request_id = 0
         self._child_ready = threading.Event()
         self.exit_code: int | None = None
+        # DAP lifecycle (ADR-0003 decision 4): the in-flight launch's
+        # request seq — its response stays withheld until
+        # configurationDone — and the session wind-down flag.
+        self._pending_launch: int | None = None
+        self._closing = False
+        self._handlers = {
+            "initialize": self._dap_initialize,
+            "launch": self._dap_launch,
+            "configurationDone": self._dap_configuration_done,
+            "threads": self._dap_threads,
+            "stackTrace": self._dap_stack_trace,
+            "continue": self._dap_continue,
+            "terminate": self._dap_terminate,
+            "disconnect": self._dap_disconnect,
+        }
 
     # ------------------------------------------------------------ child --
 
@@ -106,11 +131,18 @@ class DapServer:
             child.stdin.write(data)
             child.stdin.flush()
 
-    def ping_child(self, timeout: float = _PING_TIMEOUT_SECONDS) -> dict:
-        """Send an internal ``ping`` request and return its result.
+    def _child_request(
+        self,
+        cmd: str,
+        params: dict | None = None,
+        timeout: float = _PING_TIMEOUT_SECONDS,
+    ) -> dict:
+        """Send one internal request; return the child's result payload.
 
         Usable from any thread once :meth:`run` has spawned the child;
-        responses are resolved by the child-reader thread.
+        responses are resolved by the child-reader thread.  Raises
+        :class:`TimeoutError` when the child does not answer and
+        :class:`_ChildRequestError` when it answers with an error.
         """
         if not self._child_ready.wait(timeout):
             raise TimeoutError("service child did not start")
@@ -124,8 +156,8 @@ class DapServer:
                 {
                     "type": "request",
                     "id": request_id,
-                    "cmd": "ping",
-                    "params": {},
+                    "cmd": cmd,
+                    "params": params or {},
                 }
             )
         except (OSError, RuntimeError, ValueError) as exc:
@@ -136,16 +168,19 @@ class DapServer:
             with self._pending_lock:
                 self._pending.pop(request_id, None)
             raise TimeoutError(
-                f"service child ping timed out after {timeout}s"
+                f"service child request {cmd!r} timed out after {timeout}s"
             )
         if not request.ok:
             error = request.error or {}
-            raise RuntimeError(
-                "service child ping failed: "
-                f"{error.get('code', 'unknown')}: "
-                f"{error.get('message', '')}"
+            raise _ChildRequestError(
+                str(error.get("code", "unknown")),
+                str(error.get("message", "")),
             )
         return request.result or {}
+
+    def ping_child(self, timeout: float = _PING_TIMEOUT_SECONDS) -> dict:
+        """Internal ``ping`` round trip (handshake sanity check)."""
+        return self._child_request("ping", {}, timeout)
 
     # ------------------------------------------------------------- run --
 
@@ -181,6 +216,8 @@ class DapServer:
             if kind == "client-error":
                 return self._fail(f"malformed client frame: {payload}")
             if kind == "child-eof":
+                if self._closing:
+                    return _EXIT_OK  # disconnect/terminate wind-down
                 return self._fail(
                     "service child exited unexpectedly "
                     f"(code={payload})"
@@ -233,7 +270,14 @@ class DapServer:
             except (FramingError, OSError, ValueError) as exc:
                 self._events.put(("child-error", str(exc)))
                 return
-            self._events.put(("child-frame", frame))
+            if isinstance(frame, dict) and frame.get("type") == "response":
+                # Resolve in the pump thread: internal requests are sent
+                # from the run loop itself (launch/threads/...), so the
+                # loop cannot be its own resolver — that deadlock is why
+                # responses never route through the event queue.
+                self._resolve_pending(frame)
+            else:
+                self._events.put(("child-frame", frame))
 
     def _child_exit_code(self) -> int | None:
         return self._child.poll() if self._child is not None else None
@@ -243,25 +287,261 @@ class DapServer:
     def _handle_client_message(self, message: dict) -> str | None:
         """Answer one DAP message; returns a failure detail or None.
 
-        M2-a: every request gets the honest not-implemented response;
-        stray non-request messages are logged and ignored.
+        M2-b1 implements the lifecycle surface (initialize, launch,
+        configurationDone, threads, stackTrace, continue, terminate,
+        disconnect); everything else answers not-implemented honestly.
+        Stray non-request messages are logged and ignored.
         """
-        kind = message.get("type")
-        if kind == "request":
-            self._send_client(
-                {
-                    "type": "response",
-                    "request_seq": message.get("seq"),
-                    "success": False,
-                    "command": str(message.get("command", "")),
-                    "message": "not implemented until M2-b1",
-                }
+        if message.get("type") != "request":
+            print(
+                f"symrepl-dap: ignoring unexpected DAP message type "
+                f"{message.get('type')!r}",
+                file=sys.stderr,
             )
             return None
-        print(
-            f"symrepl-dap: ignoring unexpected DAP message type {kind!r}",
-            file=sys.stderr,
+        command = str(message.get("command", ""))
+        handler = self._handlers.get(command)
+        if handler is None:
+            self._send_response(
+                message.get("seq"),
+                command,
+                success=False,
+                message="not implemented until M2-b2",
+            )
+            return None
+        return handler(message.get("seq"), message.get("arguments") or {})
+
+    # --------------------------------------------------- DAP lifecycle --
+
+    def _dap_initialize(self, seq, _arguments: dict) -> str | None:
+        """Capabilities are frozen in ADR-0003 decision 4."""
+        self._send_response(
+            seq,
+            "initialize",
+            success=True,
+            body={
+                "supportsConfigurationDoneRequest": True,
+                "supportsTerminateRequest": True,
+            },
         )
+        return None
+
+    def _dap_launch(self, seq, arguments: dict) -> str | None:
+        """Validate parent-side (decision 11), forward to the child,
+        then fire ``initialized`` — the launch response stays withheld
+        until ``configurationDone`` (decision 4)."""
+        if self._pending_launch is not None:
+            self._send_response(
+                seq,
+                "launch",
+                success=False,
+                message="launch is already in flight",
+            )
+            return None
+        try:
+            params = self._validate_launch(arguments)
+        except ValueError as exc:
+            self._send_response(seq, "launch", success=False, message=str(exc))
+            return None
+        try:
+            result = self._child_request("launch", params, timeout=60.0)
+        except (TimeoutError, RuntimeError) as exc:
+            self._send_response(
+                seq,
+                "launch",
+                success=False,
+                message=f"service child launch failed: {exc}",
+            )
+            return None
+        self._send_event(
+            "process",
+            {
+                "systemProcessId": result.get("pid"),
+                "isLocalProcess": True,
+                "startMethod": "launch",
+                "name": params["target"],
+            },
+        )
+        self._send_event("initialized", {})
+        self._pending_launch = seq if isinstance(seq, int) else 0
+        return None
+
+    def _validate_launch(self, arguments: dict) -> dict:
+        """Freeze-check the launch schema (ADR-0003 decision 10) and
+        validate the ktest parent-side (decision 11: the child later
+        points ``KTEST_FILE`` at the user's original path)."""
+        if not isinstance(arguments, dict):
+            raise ValueError("launch arguments must be an object")
+        ktest = arguments.get("ktest")
+        target = arguments.get("target")
+        if not isinstance(ktest, str) or not ktest:
+            raise ValueError("launch requires a 'ktest' path string")
+        if not isinstance(target, str) or not target:
+            raise ValueError("launch requires a 'target' path string")
+        try:
+            _load_ktest(ktest)
+        except KTestError as exc:
+            raise ValueError(f"invalid .ktest ({ktest}): {exc}") from exc
+        except OSError as exc:
+            raise ValueError(f"unreadable .ktest ({ktest}): {exc}") from exc
+        if not os.path.exists(target):
+            raise ValueError(f"target binary not found: {target}")
+        params: dict = {"ktest": ktest, "target": target}
+        # stopOnBranch is accepted (frozen schema) and surfaces in M2-c.
+        for name, internal in (
+            ("stopOnBranch", "stop_on_branch"),
+            ("stopOnEntry", "stop_on_entry"),
+        ):
+            value = arguments.get(name, False)
+            if not isinstance(value, bool):
+                raise ValueError(f"{name} must be a boolean")
+            params[internal] = value
+        scope = arguments.get("scope", "module")
+        if not isinstance(scope, str) or not scope:
+            raise ValueError("scope must be a non-empty string")
+        params["scope"] = scope
+        timeout = arguments.get("timeout")
+        if timeout is not None:
+            if (
+                not isinstance(timeout, (int, float))
+                or isinstance(timeout, bool)
+                or timeout <= 0
+            ):
+                raise ValueError("timeout must be a positive number")
+            params["timeout"] = timeout
+        return params
+
+    def _dap_configuration_done(self, seq, _arguments: dict) -> str | None:
+        """Release the withheld launch response, then confirm."""
+        if self._pending_launch is None:
+            self._send_response(
+                seq,
+                "configurationDone",
+                success=False,
+                message="no launch in flight",
+            )
+            return None
+        launch_seq = self._pending_launch
+        self._pending_launch = None
+        try:
+            self._child_request("config_done", {}, timeout=30.0)
+        except (TimeoutError, RuntimeError) as exc:
+            detail = f"service child failed on configurationDone: {exc}"
+            self._send_response(
+                launch_seq, "launch", success=False, message=detail
+            )
+            self._send_response(
+                seq, "configurationDone", success=False, message=detail
+            )
+            return None
+        self._send_response(launch_seq, "launch", success=True, body={})
+        self._send_response(seq, "configurationDone", success=True, body={})
+        return None
+
+    def _dap_threads(self, seq, _arguments: dict) -> str | None:
+        try:
+            result = self._child_request("threads", {}, timeout=10.0)
+        except (TimeoutError, RuntimeError) as exc:
+            self._send_response(
+                seq, "threads", success=False, message=f"service child: {exc}"
+            )
+            return None
+        self._send_response(
+            seq,
+            "threads",
+            success=True,
+            body={"threads": result.get("threads", [])},
+        )
+        return None
+
+    def _dap_stack_trace(self, seq, arguments: dict) -> str | None:
+        params = {
+            "thread_id": arguments.get("threadId", 0),
+            "levels": arguments.get("levels", 20),
+        }
+        try:
+            result = self._child_request("stack_trace", params, timeout=10.0)
+        except (TimeoutError, RuntimeError) as exc:
+            self._send_response(
+                seq,
+                "stackTrace",
+                success=False,
+                message=f"service child: {exc}",
+            )
+            return None
+        self._send_response(
+            seq,
+            "stackTrace",
+            success=True,
+            body={
+                "stackFrames": result.get("stack_frames", []),
+                "totalFrames": result.get("total_frames", 0),
+            },
+        )
+        return None
+
+    def _dap_continue(self, seq, _arguments: dict) -> str | None:
+        try:
+            self._child_request("continue", {}, timeout=10.0)
+        except (TimeoutError, RuntimeError) as exc:
+            self._send_response(
+                seq, "continue", success=False, message=f"service child: {exc}"
+            )
+            return None
+        self._send_response(
+            seq, "continue", success=True, body={"allThreadsContinued": True}
+        )
+        return None
+
+    def _dap_terminate(self, seq, _arguments: dict) -> str | None:
+        """Decision 8: terminate always kills; the ``terminated`` event
+        arrives from the child right after the response."""
+        try:
+            self._child_request("terminate", {}, timeout=15.0)
+        except _ChildRequestError as exc:
+            if exc.code != "not_launched":
+                self._send_response(
+                    seq,
+                    "terminate",
+                    success=False,
+                    message=f"service child: {exc}",
+                )
+                return None
+            # Session already dead — terminate stays idempotent-success.
+        except (TimeoutError, RuntimeError) as exc:
+            self._send_response(
+                seq,
+                "terminate",
+                success=False,
+                message=f"service child: {exc}",
+            )
+            return None
+        self._send_response(seq, "terminate", success=True, body={})
+        return None
+
+    def _dap_disconnect(self, seq, _arguments: dict) -> str | None:
+        """Decision 8: disconnect always kills the inferior and the
+        child; the ``terminated`` event goes out before the session
+        ends."""
+        try:
+            self._child_request("terminate", {}, timeout=15.0)
+        except _ChildRequestError as exc:
+            if exc.code != "not_launched":
+                print(
+                    f"symrepl-dap: disconnect terminate failed: {exc}",
+                    file=sys.stderr,
+                )
+        except (TimeoutError, RuntimeError) as exc:
+            print(
+                f"symrepl-dap: disconnect terminate failed: {exc}",
+                file=sys.stderr,
+            )
+        self._send_response(seq, "disconnect", success=True, body={})
+        self._closing = True
+        try:
+            self._child_request("shutdown", {}, timeout=5.0)
+        except (TimeoutError, RuntimeError, _ChildRequestError):
+            pass  # the ladder in run() finishes the job
         return None
 
     def _handle_child_message(self, message: dict) -> bool:
@@ -273,15 +553,43 @@ class DapServer:
             self._resolve_pending(message)
             return True
         if kind == "event":
-            event = message.get("event")
-            detail = (message.get("params") or {}).get("detail", "")
-            print(
-                f"symrepl-dap: child event {event!r}: {detail}",
-                file=sys.stderr,
-            )
-            return True
+            return self._translate_child_event(message)
         print(
             f"symrepl-dap: ignoring unexpected child message type {kind!r}",
+            file=sys.stderr,
+        )
+        return True
+
+    def _translate_child_event(self, message: dict) -> bool:
+        """Map internal session events onto the DAP event vocabulary
+        (ADR-0003 decision 4): stopped → stopped; exited → exited +
+        terminated (DAP convention); terminated → terminated."""
+        event = message.get("event")
+        params = message.get("params") or {}
+        if event == "stopped":
+            body: dict = {
+                "reason": params.get("reason", "exception"),
+                "threadId": params.get("thread_id", 0),
+                "allThreadsStopped": bool(
+                    params.get("all_threads_stopped", True)
+                ),
+            }
+            if params.get("description"):
+                body["description"] = params["description"]
+            self._send_event("stopped", body)
+            return True
+        if event == "exited":
+            self._send_event(
+                "exited", {"exitCode": params.get("exit_code", 0)}
+            )
+            # DAP convention: terminated follows exited.
+            self._send_event("terminated", {})
+            return True
+        if event == "terminated":
+            self._send_event("terminated", {})
+            return True
+        print(
+            f"symrepl-dap: ignoring child event {event!r}: {params}",
             file=sys.stderr,
         )
         return True
@@ -309,6 +617,32 @@ class DapServer:
         self._client_seq += 1
         payload["seq"] = self._client_seq
         self._client_write(encode_frame(payload))
+
+    def _send_response(
+        self,
+        request_seq,
+        command: str,
+        success: bool,
+        body: dict | None = None,
+        message: str | None = None,
+    ) -> None:
+        payload: dict = {
+            "type": "response",
+            "request_seq": request_seq,
+            "success": success,
+            "command": command,
+        }
+        if body is not None:
+            payload["body"] = body
+        if message is not None:
+            payload["message"] = message
+        self._send_client(payload)
+
+    def _send_event(self, event: str, body: dict | None = None) -> None:
+        payload: dict = {"type": "event", "event": event}
+        if body is not None:
+            payload["body"] = body
+        self._send_client(payload)
 
     # ------------------------------------------------------- lifecycle --
 
