@@ -4,12 +4,17 @@ Wires the M1 replay path together:
 
     symrepl <ktest> --target <binary> [--timeout SECONDS]
 
-Exit codes:
+Exit codes (replay path):
 
 - ``0``–``255``: the target's own exit status (the replay *is* the run);
 - ``128``: the replay terminated without exiting (crash, signal);
 - ``2``: symrepl-level failure — bad arguments, unreadable `.ktest`,
   missing target, unavailable LLDB, failed launch.
+
+DAP server mode (M2-a, ADR-0003): ``symrepl dap [--port N]`` — ``dap``
+is a reserved first word, dispatched before argparse so the replay
+parser above stays untouched.  Exit codes in that mode: ``0`` clean
+session end, ``2`` symrepl-level failure.
 """
 
 from __future__ import annotations
@@ -38,7 +43,17 @@ def _describe_objects(ktest: KTest) -> list[str]:
     return lines
 
 
+def _dap_main(argv: list[str]) -> int:
+    """Run the DAP server skeleton (see :mod:`symrepl.dap_server`)."""
+    from . import dap_server  # deferred: keeps the replay path import-free
+
+    return _CLI_ERROR if dap_server.main(argv) != 0 else 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    tokens = sys.argv[1:] if argv is None else list(argv)
+    if tokens[:1] == ["dap"]:
+        return _dap_main(tokens[1:])
     parser = argparse.ArgumentParser(
         prog="symrepl",
         description="Replay symbolic-execution counterexamples under LLDB.",
@@ -138,6 +153,14 @@ def main(argv: list[str] | None = None) -> int:
         print(result.trace.render(), flush=True)
 
     return exit_status
+
+
+def _dap_main(argv: list[str]) -> int:
+    """Run the M2-a DAP server skeleton (see :mod:`symrepl.dap_server`)."""
+    from . import dap_server  # deferred: keeps the replay path lean
+
+    code = dap_server.main(argv)
+    return _CLI_ERROR if code != 0 else 0
 
 
 if __name__ == "__main__":
