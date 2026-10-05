@@ -65,6 +65,38 @@ stdout = sys.stdout.buffer
 
 if mode == "crash":
     sys.exit(1)
+if mode == "midcrash":
+    # Die right after the entry stop — mid-session child death.
+    send(stdout, {"type": "hello", "version": 1})
+    while True:
+        try:
+            message = read_frame(stdin)
+        except EOFError:
+            sys.exit(0)
+        if message.get("type") != "request":
+            continue
+        if message.get("cmd") == "launch":
+            send(stdout, {"type": "response", "id": message["id"],
+                          "ok": True, "result": {"pid": 4242}})
+        elif message.get("cmd") == "config_done":
+            send(stdout, {"type": "response", "id": message["id"],
+                          "ok": True, "result": {}})
+            send(stdout, {"type": "event", "event": "stopped",
+                          "params": {"reason": "entry", "thread_id": 1,
+                                     "all_threads_stopped": True}})
+            sys.exit(1)
+        else:
+            send(stdout, {
+                "type": "response", "id": message["id"], "ok": False,
+                "error": {"code": "unknown_command", "message": "mock"},
+            })
+if mode == "garble":
+    # A mid-session malformed frame: the session must die cleanly.
+    send(stdout, {"type": "hello", "version": 1})
+    stdout.write(b"THIS-IS-NOT-A-FRAME\r\n\r\n")
+    stdout.flush()
+    stdin.read()  # block until the shutdown ladder kills us
+    sys.exit(2)
 if mode == "badversion":
     send(stdout, {"type": "hello", "version": 99})
     stdin.read()  # block until the shutdown ladder kills us
@@ -371,8 +403,13 @@ def test_client_eof_shuts_down_cleanly():
 
 def test_child_crash_fails_server():
     with running_server("crash") as harness:
+        terminated = _recv_until_event(harness.client, "terminated")
+        assert terminated["body"] == {}
+        harness.client.close()  # hang up: the server winds down
         code = harness.join()
         assert code is not None and code != 0
+        child = harness.server.child
+        assert child is not None and child.poll() is not None
 
 
 def test_bad_hello_version_fails_server():
