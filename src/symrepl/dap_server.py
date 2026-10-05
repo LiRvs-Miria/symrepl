@@ -10,7 +10,8 @@ M2-b1 implements the lifecycle surface on that transport: initialize
 (capabilities frozen per decision 4), launch (response withheld until
 configurationDone), threads/stackTrace/continue, and
 terminate/disconnect (always kill, decision 8).  Anything else still
-answers ``success: false`` "not implemented until M2-d"; DAP event
+answers ``success: false`` "not implemented (evaluate/completions
+stay deferred past M2)"; DAP event
 semantics for child death (``terminated`` translation) are live as of
 M2-b1.
 
@@ -110,6 +111,10 @@ class DapServer:
             "variables": self._dap_variables,
             "setBreakpoints": self._dap_set_breakpoints,
             "continue": self._dap_continue,
+            "next": self._dap_next,
+            "stepIn": self._dap_step_in,
+            "stepOut": self._dap_step_out,
+            "pause": self._dap_pause,
             "terminate": self._dap_terminate,
             "disconnect": self._dap_disconnect,
             "replay.branchTrace": self._dap_branch_trace,
@@ -310,7 +315,8 @@ class DapServer:
                 message.get("seq"),
                 command,
                 success=False,
-                message="not implemented until M2-d",
+                message="not implemented (evaluate/completions stay "
+                "deferred past M2 — ADR-0003 decision 4)",
             )
             return None
         return handler(message.get("seq"), message.get("arguments") or {})
@@ -599,6 +605,48 @@ class DapServer:
         self._send_response(
             seq, "continue", success=True, body={"allThreadsContinued": True}
         )
+        return None
+
+    def _dap_step(self, seq, command: str, arguments: dict) -> str | None:
+        """M2-d: next/stepIn/stepOut — completion arrives as a
+        ``stopped(reason: "step")`` event, not in this response."""
+        try:
+            self._child_request(
+                "step",
+                {"kind": command, "thread_id": arguments.get("threadId", 0)},
+                timeout=10.0,
+            )
+        except (TimeoutError, RuntimeError) as exc:
+            self._send_response(
+                seq,
+                command,
+                success=False,
+                message=f"service child: {exc}",
+            )
+            return None
+        self._send_response(seq, command, success=True, body={})
+        return None
+
+    def _dap_next(self, seq, arguments: dict) -> str | None:
+        return self._dap_step(seq, "next", arguments)
+
+    def _dap_step_in(self, seq, arguments: dict) -> str | None:
+        return self._dap_step(seq, "stepIn", arguments)
+
+    def _dap_step_out(self, seq, arguments: dict) -> str | None:
+        return self._dap_step(seq, "stepOut", arguments)
+
+    def _dap_pause(self, seq, _arguments: dict) -> str | None:
+        """M2-d: async-interrupt the running inferior (decision 7's
+        spike-verified path); completion arrives as a stopped event."""
+        try:
+            self._child_request("pause", {}, timeout=10.0)
+        except (TimeoutError, RuntimeError) as exc:
+            self._send_response(
+                seq, "pause", success=False, message=f"service child: {exc}"
+            )
+            return None
+        self._send_response(seq, "pause", success=True, body={})
         return None
 
     def _dap_terminate(self, seq, _arguments: dict) -> str | None:

@@ -303,6 +303,19 @@ class _Service:
             }
         if cmd == "set_breakpoints":
             return self._cmd_set_breakpoints(params)
+        if cmd == "step":
+            kind = params.get("kind")
+            if not isinstance(kind, str):
+                raise SessionError("bad_request", "kind must be a string")
+            self._pending_events.extend(
+                self._require_session("step").step(
+                    kind, params.get("thread_id", 0)
+                )
+            )
+            return {}
+        if cmd == "pause":
+            self._require_session("pause").pause()
+            return {}
         raise SessionError("unknown_command", f"unknown command: {cmd!r}")
 
     def _cmd_set_breakpoints(self, params: dict) -> dict:
