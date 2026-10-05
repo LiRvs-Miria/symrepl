@@ -8,13 +8,18 @@ Parent and child speak the internal request/response + event protocol
 over the child's stdin/stdout, using the same ``Content-Length``
 framing as DAP itself (:mod:`symrepl.dap_framing`).
 
-M2-a scope (skeleton): the versioned ``hello`` handshake, the uniform
-ok/error envelope, stdio hygiene, and the lifecycle semantics.  The
-LLDB-facing behavior (launch, stepping, branch tracing) arrives with
-M2-b1 — this module deliberately does **not** import ``lldb`` yet,
-but the single-owner thread structure is established now: from M2-b1
-on, *all* SB API calls execute on the owner thread (ADR-0003
-decision 7), while the reader thread only feeds the command queue.
+M2-a established the versioned ``hello`` handshake, the uniform
+ok/error envelope, stdio hygiene, and the lifecycle semantics.  M2-b1
+adds the interactive debug surface on the same owner thread (ADR-0003
+decision 7): every SB API call executes there, while the reader thread
+only feeds the command queue.  The LLDB session itself lives in
+:mod:`symrepl.service_session`; this module is protocol plumbing.
+
+Internal commands: ``ping``, ``launch`` (ktest/target/stop_on_entry/
+scope/timeout), ``config_done``, ``continue``, ``threads``,
+``stack_trace`` (thread_id, levels), ``terminate``, ``shutdown``.
+Session events (``stopped`` / ``exited`` / ``terminated``) flow to the
+parent as protocol events, in wire order.
 
 Wire contract (frozen):
 
@@ -52,6 +57,7 @@ import sys
 import threading
 
 from .dap_framing import FrameReader, FramingError, encode_frame
+from .service_session import POLL_SECONDS, LldbSession, SessionError
 
 _PROTOCOL_VERSION = 1
 
@@ -71,6 +77,8 @@ class _Service:
         self._log = log
         self._commands: queue.Queue = queue.Queue()
         self._stop = threading.Event()
+        self._session: LldbSession | None = None
+        self._pending_events: list[dict] = []
 
     # ------------------------------------------------------------- io --
 
@@ -116,6 +124,12 @@ class _Service:
 
     # ----------------------------------------------------------- run --
 
+    def _close_session(self) -> None:
+        """Tear the LLDB session down; safe to call repeatedly."""
+        if self._session is not None:
+            self._session.close()
+            self._session = None
+
     def run(self) -> int:
         """Serve until EOF, a shutdown request, or a protocol violation.
 
@@ -127,19 +141,36 @@ class _Service:
         )
         reader.start()
         while True:
-            kind, payload = self._commands.get()
+            # Forward session state first, so a response sent below can
+            # never overtake the events it caused.
+            if self._session is not None:
+                for event in self._session.poll_events():
+                    self._send({"type": "event", **event})
+                if self._session.terminal:
+                    self._close_session()
+            if self._pending_events:
+                pending, self._pending_events = self._pending_events, []
+                for event in pending:
+                    self._send({"type": "event", **event})
+            try:
+                kind, payload = self._commands.get(timeout=POLL_SECONDS)
+            except queue.Empty:
+                continue
             if kind == "eof":
-                # Parent is gone — clean close or SIGKILL; nothing to
-                # clean up in M2-a.  This is the stdin-EOF suicide.
+                # Parent is gone — clean close or SIGKILL; this is the
+                # stdin-EOF suicide (ADR-0003 decision 8).
+                self._close_session()
                 return _EXIT_OK
             if kind == "fatal":
                 self._log(f"symrepl-service: {payload}\n")
+                self._close_session()
                 self._try_send_event(
                     "protocol_violation", {"detail": payload}
                 )
                 return _EXIT_PROTOCOL
             status = self._handle(payload)
             if status is not None:
+                self._close_session()
                 return status
 
     def _handle(self, message: dict) -> int | None:
@@ -173,36 +204,117 @@ class _Service:
             )
             return None
 
-        if cmd == "ping":
-            self._send(
-                {
-                    "type": "response",
-                    "id": message_id,
-                    "ok": True,
-                    "result": {
-                        "pong": True,
-                        "service_version": _PROTOCOL_VERSION,
-                    },
-                }
-            )
-            return None
         if cmd == "shutdown":
             self._send({"type": "response", "id": message_id, "ok": True,
                         "result": {}})
             return _EXIT_OK
 
+        try:
+            result = self._dispatch(cmd, message.get("params") or {})
+        except SessionError as exc:
+            self._send(
+                {
+                    "type": "response",
+                    "id": message_id,
+                    "ok": False,
+                    "error": {"code": exc.code, "message": exc.message},
+                }
+            )
+            return None
         self._send(
             {
                 "type": "response",
                 "id": message_id,
-                "ok": False,
-                "error": {
-                    "code": "unknown_command",
-                    "message": f"unknown command: {cmd!r}",
-                },
+                "ok": True,
+                "result": result,
             }
         )
         return None
+
+    # ------------------------------------------------- session commands --
+
+    def _require_session(self, action: str) -> LldbSession:
+        if self._session is None:
+            raise SessionError("not_launched", f"no session to {action}")
+        return self._session
+
+    def _dispatch(self, cmd: str, params: dict) -> dict:
+        """Interactive session commands; returns the ok-result payload.
+        Session state failures raise :class:`SessionError` with a
+        machine-readable code."""
+        if cmd == "ping":
+            return {"pong": True, "service_version": _PROTOCOL_VERSION}
+        if cmd == "launch":
+            return self._cmd_launch(params)
+        if cmd == "config_done":
+            self._pending_events.extend(
+                self._require_session("config_done").config_done()
+            )
+            return {}
+        if cmd == "continue":
+            self._pending_events.extend(
+                self._require_session("continue").continue_()
+            )
+            return {"all_threads_continued": True}
+        if cmd == "threads":
+            return {"threads": self._require_session("threads").threads()}
+        if cmd == "stack_trace":
+            return self._cmd_stack_trace(params)
+        if cmd == "terminate":
+            self._pending_events.extend(
+                self._require_session("terminate").terminate()
+            )
+            return {}
+        raise SessionError("unknown_command", f"unknown command: {cmd!r}")
+
+    def _cmd_launch(self, params: dict) -> dict:
+        if self._session is not None:
+            raise SessionError(
+                "already_launched", "a session is already running"
+            )
+        ktest = params.get("ktest")
+        target = params.get("target")
+        if not isinstance(ktest, str) or not isinstance(target, str):
+            raise SessionError(
+                "bad_request", "launch requires ktest and target strings"
+            )
+        stop_on_entry = bool(params.get("stop_on_entry", False))
+        scope = params.get("scope", "module")
+        if not isinstance(scope, str):
+            raise SessionError("bad_request", "scope must be a string")
+        timeout = params.get("timeout")
+        if timeout is not None and (
+            not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or timeout <= 0
+        ):
+            raise SessionError(
+                "bad_request", "timeout must be a positive number"
+            )
+        self._session = LldbSession()
+        try:
+            return self._session.launch(
+                ktest,
+                target,
+                stop_on_entry=stop_on_entry,
+                scope=scope,
+                timeout=timeout,
+            )
+        except SessionError:
+            self._session = None  # a failed launch leaves nothing behind
+            raise
+
+    def _cmd_stack_trace(self, params: dict) -> dict:
+        session = self._require_session("stack_trace")
+        thread_id = params.get("thread_id", 0)
+        if not isinstance(thread_id, int) or isinstance(thread_id, bool):
+            raise SessionError(
+                "bad_request", "thread_id must be an integer"
+            )
+        levels = params.get("levels", 20)
+        if not isinstance(levels, int) or isinstance(levels, bool) or levels < 1:
+            levels = 20
+        return session.stack_trace(thread_id, levels)
 
 
 def main(argv: list[str] | None = None) -> int:
