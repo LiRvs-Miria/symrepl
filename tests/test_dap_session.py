@@ -275,6 +275,74 @@ def test_dap_output_forwards_stderr(get_sign_bin):
         assert server.exit_code == 0
 
 
+def test_dap_stepping_kinds_and_pause(get_sign_bin):
+    """M2-d acceptance: each step kind stops within the expected
+    function; pausing a stopped session fails honestly (the real
+    pause-positive path is spike-verified; a long-running fixture
+    lands with the M2-e acceptance scenario)."""
+    with dap_session() as (server, client, thread):
+        _launch_get_sign(client, KTESTS / "get_sign_test000001.ktest",
+                         get_sign_bin, stop_on_entry=True)
+        reply = client.request("configurationDone")
+        assert reply["success"] is True
+        stopped = client.wait_event("stopped")
+        assert stopped["body"]["reason"] == "entry"
+        thread_id = stopped["body"]["threadId"]
+
+        source = Path(__file__).parent / "fixtures" / "src" / "get_sign.c"
+        reply = client.request(
+            "setBreakpoints",
+            {"source": {"path": str(source)},
+             "breakpoints": [{"line": 11}]},
+        )
+        assert reply["success"] is True
+        bp = reply["body"]["breakpoints"][0]
+        assert bp["verified"] is True and bp["line"] == 11
+
+        client.request("continue")
+        hit = client.wait_event("stopped")
+        assert hit["body"]["reason"] == "breakpoint"
+
+        reply = client.request("stackTrace", {"threadId": thread_id})
+        top = reply["body"]["stackFrames"][0]
+        assert top["name"] == "get_sign" and top["line"] == 11
+
+        reply = client.request("next", {"threadId": thread_id})
+        assert reply["success"] is True
+        stepped = client.wait_event("stopped")
+        assert stepped["body"]["reason"] == "step"
+        reply = client.request("stackTrace", {"threadId": thread_id})
+        top = reply["body"]["stackFrames"][0]
+        assert top["name"] == "get_sign" and top["line"] == 12
+
+        reply = client.request("stepIn", {"threadId": thread_id})
+        assert reply["success"] is True
+        stepped = client.wait_event("stopped")
+        assert stepped["body"]["reason"] == "step"
+
+        reply = client.request("stepOut", {"threadId": thread_id})
+        assert reply["success"] is True
+        out_stopped = client.wait_event("stopped")
+        assert out_stopped["body"]["reason"] == "step"
+        reply = client.request("stackTrace", {"threadId": thread_id})
+        assert reply["body"]["stackFrames"][0]["name"] == "main"
+
+        # Pausing a stopped session fails honestly (not_stopped).
+        reply = client.request("pause", {"threadId": thread_id})
+        assert reply["success"] is False
+        assert "not_stopped" in reply["message"]
+
+        reply = client.request("continue")
+        assert reply["success"] is True
+        exited = client.wait_event("exited")
+        assert exited["body"]["exitCode"] == 0
+
+        reply = client.request("disconnect")
+        assert reply["success"] is True
+        thread.join(timeout=15)
+        assert server.exit_code == 0
+
+
 def test_dap_breakpoints_variables_and_stale_reference(get_sign_bin):
     """Decision 12 in action: a resume invalidates the previous stop's
     references; breakpoint hits report hitBreakpointIds; variables at

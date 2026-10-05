@@ -173,6 +173,18 @@ if mode == "lifecycle":
                 "type": "response", "id": message["id"], "ok": True,
                 "result": {"breakpoints": [{"line": 5, "verified": True}]},
             })
+        elif command == "step":
+            send(stdout, {"type": "response", "id": message["id"],
+                          "ok": True, "result": {}})
+            send(stdout, {"type": "event", "event": "stopped",
+                          "params": {"reason": "step", "thread_id": 1,
+                                     "all_threads_stopped": True}})
+        elif command == "pause":
+            send(stdout, {"type": "response", "id": message["id"],
+                          "ok": True, "result": {}})
+            send(stdout, {"type": "event", "event": "stopped",
+                          "params": {"reason": "pause", "thread_id": 1,
+                                     "all_threads_stopped": True}})
         elif command == "shutdown":
             send(stdout, {"type": "response", "id": message["id"],
                           "ok": True, "result": {}})
@@ -324,7 +336,7 @@ def test_dap_request_answers_not_implemented():
         assert reply["request_seq"] == 1
         assert reply["success"] is False
         assert reply["command"] == "evaluate"
-        assert "M2-d" in reply["message"]
+        assert "not implemented" in reply["message"]
         assert isinstance(reply["seq"], int) and reply["seq"] >= 1
         harness.client.close()  # clean session end
         assert harness.join() == 0
@@ -751,5 +763,60 @@ def test_breakpoint_hit_and_stale_reference(ktest_file):
         )
         exited_frame = _recv_until_event(harness.client, "exited")
         assert exited_frame.get("event") == "exited"
+        harness.client.close()
+        assert harness.join() == 0
+
+
+def test_stepping_and_pause_over_mock(ktest_file):
+    """M2-d over the mock: next reports a step stop; pause reports a
+    pause stop."""
+    with running_server("lifecycle") as harness:
+        events: list = []
+        harness.client.send(
+            {"seq": 1, "type": "request", "command": "initialize",
+             "arguments": {}}
+        )
+        _drain_until_response(harness.client, events)
+        harness.client.send(
+            {
+                "seq": 2,
+                "type": "request",
+                "command": "launch",
+                "arguments": {"ktest": ktest_file, "target": sys.executable},
+            }
+        )
+        harness.client.send(
+            {
+                "seq": 3,
+                "type": "request",
+                "command": "configurationDone",
+                "arguments": {},
+            }
+        )
+        launch_reply = _drain_until_response(harness.client, events)
+        assert launch_reply["command"] == "launch"
+        config_reply = _drain_until_response(harness.client, events)
+        assert config_reply["command"] == "configurationDone"
+        stopped_entry = _recv_until_event(harness.client, "stopped")
+        assert stopped_entry["body"]["reason"] == "entry"
+
+        harness.client.send(
+            {"seq": 4, "type": "request", "command": "next",
+             "arguments": {"threadId": 1}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        assert reply["command"] == "next" and reply["success"]
+        stepped = _recv_until_event(harness.client, "stopped")
+        assert stepped["body"]["reason"] == "step"
+
+        harness.client.send(
+            {"seq": 5, "type": "request", "command": "pause",
+             "arguments": {"threadId": 1}}
+        )
+        reply = _drain_until_response(harness.client, events)
+        assert reply["command"] == "pause" and reply["success"]
+        paused = _recv_until_event(harness.client, "stopped")
+        assert paused["body"]["reason"] == "pause"
+
         harness.client.close()
         assert harness.join() == 0
