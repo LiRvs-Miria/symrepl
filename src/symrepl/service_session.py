@@ -42,11 +42,24 @@ import tempfile
 import time
 from typing import Any
 
-from .lldb_driver import _ensure_debug_server, _ensure_lldb
+from . import branches as _branches
+from .lldb_driver import (
+    _MAX_RESUMES,
+    _MAX_SITES,
+    _collect_sites,
+    _ensure_debug_server,
+    _ensure_lldb,
+)
+from .trace import Hit, TraceReport
 
 #: Owner-loop poll cadence (ADR-0003 decision 7: short polls purely to
 #: yield CPU and check shutdown flags).
 POLL_SECONDS = 0.1
+
+#: Per-poll cap per stream when forwarding inferior stdio (decision 13:
+#: droppable, bounded — excess bytes are dropped with a truncation
+#: marker instead of stalling the session).
+_OUTPUT_CHUNK = 8192
 
 _ENTRY_STOP_WAIT_SECONDS = 10.0
 
@@ -90,6 +103,19 @@ class LldbSession:
         self._var_refs: dict[int, tuple[int, int]] = {}  # ref → (gen, frame)
         self._ref_counter = 0
         self._own_breakpoint_ids: list[int] = []
+        # Branch tracing (M1 semantics, session-side recording; ADR-0003
+        # decision 5).
+        self._stop_on_branch = False
+        self._sites: tuple = ()
+        self._site_index: dict = {}
+        self._hit_pcs: list[int] = []
+        self._hit_vars: list[tuple[tuple[str, str], ...]] = []
+        self._trace_enabled = False
+        self._resume_count = 0
+        self._exit_code: int | None = None
+        # Inferior output forwarding (decision 13: droppable, bounded).
+        self._io_offsets = {"stdout": 0, "stderr": 0}
+        self._dropped = {"stdout": 0, "stderr": 0}
 
     # ------------------------------------------------------------ state --
 
@@ -113,6 +139,7 @@ class LldbSession:
         ktest: str,
         target: str,
         stop_on_entry: bool = False,
+        stop_on_branch: bool = False,
         scope: str = "module",
         timeout: float | None = None,
     ) -> dict:
@@ -124,6 +151,7 @@ class LldbSession:
         """
         self._require_phase("entry", code="already_launched", action="launch")
         self._stop_on_entry = stop_on_entry
+        self._stop_on_branch = stop_on_branch
         self._scope = scope
         self._lldb = _ensure_lldb()
         _ensure_debug_server()
@@ -163,6 +191,7 @@ class LldbSession:
                     "launch_failed", f"lldb failed to launch {target}: {detail}"
                 )
             self._wait_entry_stop()
+            self._install_branch_sites(target)
         except SessionError:
             self._teardown_debugger()
             raise
@@ -190,6 +219,97 @@ class LldbSession:
             f"inferior did not reach its entry stop within "
             f"{_ENTRY_STOP_WAIT_SECONDS}s",
         )
+
+    def _install_branch_sites(self, target_path: str) -> None:
+        """M1 parity: one breakpoint per conditional site in scope
+        (ADR-0002 decision 2, replayed session-side)."""
+        sites = _collect_sites(
+            self._lldb, self._target, self._scope, target_path
+        )
+        if len(sites) > _MAX_SITES:
+            raise SessionError(
+                "launch_failed",
+                f"scope {self._scope!r} matches {len(sites)} conditional "
+                f"sites (>{_MAX_SITES}); narrow it, e.g. scope a function",
+            )
+        for site in sites:
+            self._target.BreakpointCreateByAddress(site.address)
+        self._sites = sites
+        self._site_index = {site.address: site for site in sites}
+        self._trace_enabled = True
+
+    def _record_hit(self, frame, pc: int) -> None:
+        """Session-side recording of one traced-site stop (the LLDB
+        22.1.8 scripted-callback workaround from M1)."""
+        variables = tuple(
+            (v.GetName(), v.GetValue() or "")
+            for v in frame.GetVariables(True, True, False, True)
+        )
+        self._hit_pcs.append(pc)
+        self._hit_vars.append(variables)
+
+    def _trace_report_text(self, run_ended: bool) -> str | None:
+        """The ordered M1 report — ``None`` when tracing is off."""
+        if not self._trace_enabled:
+            return None
+        outcomes = _branches.infer_outcomes(
+            self._site_index, self._hit_pcs, run_ended=run_ended
+        )
+        hits = tuple(
+            Hit(
+                order=i + 1,
+                site=self._site_index[pc],
+                variables=variables,
+                outcome=outcomes[i],
+            )
+            for i, (pc, variables) in enumerate(
+                zip(self._hit_pcs, self._hit_vars)
+            )
+        )
+        report = TraceReport(scope=self._scope, sites=self._sites, hits=hits)
+        return report.render()
+
+    def branch_trace(self) -> dict:
+        """The ``replay.branchTrace`` surface: the ordered report so far
+        (``{"trace": None}`` when tracing is off)."""
+        run_ended = self._phase == "dead" and self._exit_code is not None
+        return {"trace": self._trace_report_text(run_ended)}
+
+    def _poll_output(self) -> list[dict]:
+        """Forward inferior stdio (decision 13: droppable, bounded — a
+        poll cadence slower than the writer drops bytes and inserts a
+        truncation marker instead of stalling the session)."""
+        events: list[dict] = []
+        for stream in ("stdout", "stderr"):
+            path = os.path.join(self._io_dir.name, stream)
+            offset = self._io_offsets[stream]
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                continue
+            if size <= offset:
+                continue
+            with open(path, "rb") as handle:
+                handle.seek(offset)
+                chunk = handle.read(_OUTPUT_CHUNK)
+            new_offset = offset + len(chunk)
+            if size > new_offset:
+                self._dropped[stream] += size - new_offset
+                new_offset = size
+            self._io_offsets[stream] = new_offset
+            text = chunk.decode(errors="replace")
+            if self._dropped[stream] > 0:
+                text += (
+                    f"\n[symrepl: {self._dropped[stream]} byte(s) truncated]"
+                )
+                self._dropped[stream] = 0
+            events.append(
+                {
+                    "event": "output",
+                    "params": {"category": stream, "text": text},
+                }
+            )
+        return events
 
     # ------------------------------------------------------- commands --
 
@@ -224,6 +344,17 @@ class LldbSession:
         # generation — stale ids must error, never mis-resolve.
         self._generation += 1
         self._var_refs.clear()
+        self._resume_count += 1
+        if self._resume_count > _MAX_RESUMES:
+            # M1's safety valve: a pathological trace must not spin the
+            # session forever.
+            print(
+                f"symrepl-service: exceeded {_MAX_RESUMES} resumes; "
+                "aborting a pathological trace",
+                flush=True,
+            )
+            self.terminate()
+            return
         self._process.Continue()  # async: returns immediately
         self._phase = "running"
 
@@ -449,11 +580,19 @@ class LldbSession:
 
         if state == exited:
             code = int(self._process.GetExitStatus() or 0)
+            self._exit_code = code
             self._phase = "dead"
-            return [
-                {"event": "exited", "params": {"exit_code": code}},
-                self._terminated_event(),
-            ]
+            events = self._poll_output()  # final stdio before the news
+            events.append(
+                {"event": "exited", "params": {"exit_code": code}}
+            )
+            events.append(self._terminated_event())
+            trace = self._trace_report_text(run_ended=True)
+            if trace is not None:
+                events.append(
+                    {"event": "trace_report", "params": {"text": trace}}
+                )
+            return events
 
         if self._phase in ("entry", "entry_stopped"):
             # The launch entry stop (and any stragglers before
@@ -465,20 +604,67 @@ class LldbSession:
         if self._phase == "terminating":
             if state in self._terminal_states():
                 self._phase = "dead"
-                return [self._terminated_event()]
+                return self._dead_tail(run_ended=False)
             return []
 
         if self._phase == "running":
             if state == stopped:
-                self._phase = "stopped"
-                return [self._crash_or_stop_event()]
+                return self._on_stop()
             if state in self._terminal_states():
                 self._phase = "dead"
-                return [self._terminated_event()]
+                return self._dead_tail(run_ended=False)
             return []
 
         # stopped / dead stragglers: nothing to report.
         return []
+
+    def _dead_tail(self, run_ended: bool) -> list[dict]:
+        """Terminal events of a non-exit death + the trace report."""
+        events = self._poll_output()
+        events.append(self._terminated_event())
+        trace = self._trace_report_text(run_ended=run_ended)
+        if trace is not None:
+            events.append(
+                {"event": "trace_report", "params": {"text": trace}}
+            )
+        return events
+
+    def _on_stop(self) -> list[dict]:
+        """A stop while running: a traced site (record-and-continue in
+        M1 parity, reported under ``stopOnBranch``) or a real stop."""
+        thread = self._stopped_thread()
+        frame = (
+            thread.GetFrameAtIndex(0)
+            if thread is not None and thread.GetNumFrames() > 0
+            else None
+        )
+        pc = int(frame.GetPC()) if frame is not None else 0
+        raw = (
+            int(thread.GetStopReason())
+            if thread is not None and thread.IsValid()
+            else 0
+        )
+        if (
+            raw == int(self._lldb.eStopReasonBreakpoint)
+            and pc in self._site_index
+        ):
+            self._record_hit(frame, pc)
+            if self._stop_on_branch:
+                site = self._site_index[pc]
+                self._begin_reported_stop()
+                self._phase = "stopped"
+                event = self._stopped_event("breakpoint")
+                event["params"]["description"] = (
+                    f"{site.function} {site.mnemonic}"
+                )
+                return [event]
+            # M1 parity: record and auto-continue.
+            self._resume()
+            return []
+        events = self._poll_output()
+        self._phase = "stopped"
+        events.append(self._crash_or_stop_event())
+        return events
 
     def _terminal_states(self) -> frozenset[int]:
         lldb = self._lldb
