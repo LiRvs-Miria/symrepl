@@ -10,7 +10,7 @@ M2-b1 implements the lifecycle surface on that transport: initialize
 (capabilities frozen per decision 4), launch (response withheld until
 configurationDone), threads/stackTrace/continue, and
 terminate/disconnect (always kill, decision 8).  Anything else still
-answers ``success: false`` "not implemented until M2-c"; DAP event
+answers ``success: false`` "not implemented until M2-d"; DAP event
 semantics for child death (``terminated`` translation) are live as of
 M2-b1.
 
@@ -112,6 +112,7 @@ class DapServer:
             "continue": self._dap_continue,
             "terminate": self._dap_terminate,
             "disconnect": self._dap_disconnect,
+            "replay.branchTrace": self._dap_branch_trace,
         }
 
     # ------------------------------------------------------------ child --
@@ -309,7 +310,7 @@ class DapServer:
                 message.get("seq"),
                 command,
                 success=False,
-                message="not implemented until M2-c",
+                message="not implemented until M2-d",
             )
             return None
         return handler(message.get("seq"), message.get("arguments") or {})
@@ -651,6 +652,26 @@ class DapServer:
             pass  # the ladder in run() finishes the job
         return None
 
+    def _dap_branch_trace(self, seq, _arguments: dict) -> str | None:
+        """Decision 5: the ordered M1 report via the ``replay.*``
+        custom-request prefix (``trace`` is ``None`` when tracing is
+        off)."""
+        try:
+            result = self._child_request("branch_trace", {}, timeout=15.0)
+        except (TimeoutError, RuntimeError) as exc:
+            self._send_response(
+                seq,
+                "replay.branchTrace",
+                success=False,
+                message=f"service child: {exc}",
+            )
+            return None
+        self._send_response(
+            seq, "replay.branchTrace", success=True,
+            body={"trace": result.get("trace")},
+        )
+        return None
+
     def _handle_child_message(self, message: dict) -> bool:
         """Route one internal-protocol message; False on violation."""
         kind = message.get("type")
@@ -696,6 +717,24 @@ class DapServer:
             return True
         if event == "terminated":
             self._send_event("terminated", {})
+            return True
+        if event == "output":
+            # Decision 13: inferior stdio forwarding (droppable upstream).
+            self._send_event(
+                "output",
+                {
+                    "category": params.get("category", "stdout"),
+                    "output": params.get("text", ""),
+                },
+            )
+            return True
+        if event == "trace_report":
+            # Decision 5: the session end pushes the ordered report to
+            # the Debug Console via an output event.
+            self._send_event(
+                "output",
+                {"category": "stdout", "output": params.get("text", "")},
+            )
             return True
         print(
             f"symrepl-dap: ignoring child event {event!r}: {params}",

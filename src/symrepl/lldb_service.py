@@ -147,7 +147,10 @@ class _Service:
                 for event in self._session.poll_events():
                     self._send({"type": "event", **event})
                 if self._session.terminal:
-                    self._close_session()
+                    # Resources are released, but the session object
+                    # stays — the trace report must remain retrievable
+                    # via replay.branchTrace afterwards.
+                    self._session.close()
             if self._pending_events:
                 pending, self._pending_events = self._pending_events, []
                 for event in pending:
@@ -284,6 +287,8 @@ class _Service:
                 self._require_session("terminate").terminate()
             )
             return {}
+        if cmd == "branch_trace":
+            return self._require_session("branch_trace").branch_trace()
         if cmd == "scopes":
             return {
                 "scopes": self._require_session("scopes").scopes(
@@ -322,6 +327,7 @@ class _Service:
                 "bad_request", "launch requires ktest and target strings"
             )
         stop_on_entry = bool(params.get("stop_on_entry", False))
+        stop_on_branch = bool(params.get("stop_on_branch", False))
         scope = params.get("scope", "module")
         if not isinstance(scope, str):
             raise SessionError("bad_request", "scope must be a string")
@@ -340,6 +346,7 @@ class _Service:
                 ktest,
                 target,
                 stop_on_entry=stop_on_entry,
+                stop_on_branch=stop_on_branch,
                 scope=scope,
                 timeout=timeout,
             )
