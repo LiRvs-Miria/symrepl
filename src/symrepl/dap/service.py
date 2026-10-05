@@ -2,18 +2,18 @@
 decision 1).
 
 The DAP server parent spawns this child (``python -m
-symrepl.lldb_service``) per debug session; the child holds SBDebugger
+symrepl.dap.service``) per debug session; the child holds SBDebugger
 and the inferior for the session's lifetime and is destroyed with it.
 Parent and child speak the internal request/response + event protocol
 over the child's stdin/stdout, using the same ``Content-Length``
-framing as DAP itself (:mod:`symrepl.dap_framing`).
+framing as DAP itself (:mod:`symrepl.dap.framing`).
 
 M2-a established the versioned ``hello`` handshake, the uniform
 ok/error envelope, stdio hygiene, and the lifecycle semantics.  M2-b1
 adds the interactive debug surface on the same owner thread (ADR-0003
 decision 7): every SB API call executes there, while the reader thread
 only feeds the command queue.  The LLDB session itself lives in
-:mod:`symrepl.service_session`; this module is protocol plumbing.
+:mod:`symrepl.dap.session`; this module is protocol plumbing.
 
 Internal commands: ``ping``, ``launch`` (ktest/target/stop_on_entry/
 scope/timeout), ``config_done``, ``continue``, ``threads``,
@@ -56,8 +56,8 @@ import queue
 import sys
 import threading
 
-from .dap_framing import FrameReader, FramingError, encode_frame
-from .service_session import POLL_SECONDS, LldbSession, SessionError
+from .framing import FrameReader, FramingError, encode_frame
+from .session import POLL_SECONDS, LldbSession, SessionError
 
 _PROTOCOL_VERSION = 1
 
@@ -104,7 +104,7 @@ class _Service:
         Never writes protocol bytes (ADR-0003 decision 7: reader
         threads never write).  ``read1`` because ``read`` on a
         BufferedReader blocks until the full chunk arrives — small
-        frames would sit undelivered (see :mod:`symrepl.dap_framing`).
+        frames would sit undelivered (see :mod:`symrepl.dap.framing`).
         """
         reader = FrameReader(sys.stdin.buffer.read1)  # type: ignore[attr-defined]  # runtime object is a BufferedReader
         while not self._stop.is_set():

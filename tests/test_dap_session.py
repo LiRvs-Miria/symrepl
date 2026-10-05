@@ -1,6 +1,6 @@
 """End-to-end DAP lifecycle tests against the REAL service child.
 
-The full production chain — ``DapServer`` + real ``symrepl.lldb_service``
+The full production chain — ``DapServer`` + real ``symrepl.dap.service``
 child + real LLDB + the get_sign target (kleeRuntest harness) — is
 driven by a hand-written DAP client over a socketpair (the
 ``debugServer`` mode VS Code-less clients use).  Everything skips
@@ -21,8 +21,8 @@ from pathlib import Path
 import pytest
 
 from conftest import KTESTS
-from symrepl.dap_framing import FrameReader, encode_frame
-from symrepl.dap_server import DapServer, _flushing, _spawn_service
+from symrepl.dap.framing import FrameReader, encode_frame
+from symrepl.dap.server import DapServer, _flushing, _spawn_service
 
 pytestmark = pytest.mark.skipif(
     shutil.which("lldb") is None, reason="lldb not available"

@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from symrepl.dap_framing import (
+from symrepl.dap.framing import (
     FrameReader,
     FramingError,
     encode_frame,
@@ -89,13 +89,13 @@ def test_duplicate_content_length():
 
 
 def test_declared_length_over_cap(monkeypatch):
-    monkeypatch.setattr("symrepl.dap_framing.MAX_FRAME_BYTES", 8)
+    monkeypatch.setattr("symrepl.dap.framing.MAX_FRAME_BYTES", 8)
     with pytest.raises(FramingError):
         _reader(b"Content-Length: 9\r\n\r\n123456789").read_frame()
 
 
 def test_encode_over_cap(monkeypatch):
-    monkeypatch.setattr("symrepl.dap_framing.MAX_FRAME_BYTES", 4)
+    monkeypatch.setattr("symrepl.dap.framing.MAX_FRAME_BYTES", 4)
     with pytest.raises(FramingError):
         encode_frame({"x": "yyyyy"})
 
@@ -136,6 +136,6 @@ def test_header_line_without_colon():
 
 
 def test_runaway_header_section(monkeypatch):
-    monkeypatch.setattr("symrepl.dap_framing.MAX_HEADER_BYTES", 16)
+    monkeypatch.setattr("symrepl.dap.framing.MAX_HEADER_BYTES", 16)
     with pytest.raises(FramingError):
         _reader(b"X: " + b"y" * 64).read_frame()

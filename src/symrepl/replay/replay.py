@@ -13,7 +13,7 @@ import os
 import tempfile
 
 from .ktest import KTest, dump
-from .lldb_driver import ReplayResult, run
+from .driver import ReplayResult, run
 
 __all__ = ["ReplayResult", "replay"]
 

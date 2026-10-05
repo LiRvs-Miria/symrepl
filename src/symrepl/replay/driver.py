@@ -503,7 +503,7 @@ def run(
         cmd = [
             sys.executable,
             "-m",
-            "symrepl.lldb_driver",
+            "symrepl.replay.driver",
             "--ktest",
             ktest_path,
             "--target",

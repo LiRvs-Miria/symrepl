@@ -3,7 +3,7 @@
 Topology (ADR-0003 decisions 1, 3): this process *is* the DAP server —
 it speaks DAP to the client over stdio (default) or a single TCP
 connection (``--port``), and drives one long-lived
-``symrepl.lldb_service`` child per session over the internal framed
+``symrepl.dap.service`` child per session over the internal framed
 protocol.
 
 M2-b1 implements the lifecycle surface on that transport: initialize
@@ -37,8 +37,8 @@ import tempfile
 import threading
 from collections.abc import Callable
 
-from .dap_framing import FrameReader, FramingError, encode_frame
-from .ktest import KTestError, load as _load_ktest
+from .framing import FrameReader, FramingError, encode_frame
+from ..replay.ktest import KTestError, load as _load_ktest
 
 _PROTOCOL_VERSION = 1
 
@@ -938,7 +938,7 @@ def _flushing(buffer) -> Callable[[bytes], None]:
 
 
 def _spawn_service() -> subprocess.Popen:
-    """Production child spawner: the real ``symrepl.lldb_service``
+    """Production child spawner: the real ``symrepl.dap.service``
     with its own diagnostics log; its stderr is discarded because the
     child owns its hygiene."""
     fd, log_path = tempfile.mkstemp(
@@ -946,7 +946,7 @@ def _spawn_service() -> subprocess.Popen:
     )
     os.close(fd)
     return subprocess.Popen(
-        [sys.executable, "-m", "symrepl.lldb_service", "--log", log_path],
+        [sys.executable, "-m", "symrepl.dap.service", "--log", log_path],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,

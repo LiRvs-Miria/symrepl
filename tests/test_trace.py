@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from symrepl.branches import BranchSite
-from symrepl.trace import Hit, TraceReport
+from symrepl.replay.branches import BranchSite
+from symrepl.replay.trace import Hit, TraceReport
 
 SITE_JNE = BranchSite(
     address=0x1149, function="get_sign", mnemonic="jne", size=2, target=0x1152

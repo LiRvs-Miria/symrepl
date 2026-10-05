@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from symrepl.cli import main
-from symrepl.ktest import KTEST_MAGIC
+from symrepl.replay.ktest import KTEST_MAGIC
 
 KTESTS = Path(__file__).parents[1] / "third_party" / "klee" / "ktest"
 

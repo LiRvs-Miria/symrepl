@@ -213,7 +213,7 @@ def main() -> int:
 
 
 sys.path.insert(0, str(ROOT / "src"))
-from symrepl.dap_framing import FrameReader, encode_frame  # noqa: E402
+from symrepl.dap.framing import FrameReader, encode_frame  # noqa: E402
 
 if __name__ == "__main__":
     raise SystemExit(main())

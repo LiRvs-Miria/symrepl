@@ -5,7 +5,7 @@ framing inline *on purpose* — it validates the wire protocol, not
 shared code — and the client side is a raw socketpair, mirroring the
 ``debugServer`` mode DAP clients use without VS Code.  The mock speaks
 the internal contract frozen for M2-a (see
-:mod:`symrepl.lldb_service`): versioned hello, ping/shutdown commands,
+:mod:`symrepl.dap.service`): versioned hello, ping/shutdown commands,
 nonzero exit on protocol violations.
 """
 
@@ -20,9 +20,9 @@ from contextlib import contextmanager
 
 import pytest
 
-from symrepl.dap_framing import FrameReader, encode_frame
-from symrepl.dap_server import DapServer, _flushing
-from symrepl.ktest import KTest, dump
+from symrepl.dap.framing import FrameReader, encode_frame
+from symrepl.dap.server import DapServer, _flushing
+from symrepl.replay.ktest import KTest, dump
 
 _MOCK_CHILD_CODE = r"""
 import json

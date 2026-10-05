@@ -1,6 +1,6 @@
 """Interactive LLDB session owned by the service child (M2-b1).
 
-Where :mod:`symrepl.lldb_driver` runs a *one-shot* replay to exit, this
+Where :mod:`symrepl.replay.driver` runs a *one-shot* replay to exit, this
 module keeps SBDebugger and the inferior alive across DAP requests:
 launch, stop at entry, then an owner-driven loop of continue /
 threads / stack traces with state events flowing back to the parent
@@ -42,15 +42,15 @@ import tempfile
 import time
 from typing import Any
 
-from . import branches as _branches
-from .lldb_driver import (
+from ..replay import branches as _branches
+from ..replay.driver import (
     _MAX_RESUMES,
     _MAX_SITES,
     _collect_sites,
     _ensure_debug_server,
     _ensure_lldb,
 )
-from .trace import Hit, TraceReport
+from ..replay.trace import Hit, TraceReport
 
 #: Owner-loop poll cadence (ADR-0003 decision 7: short polls purely to
 #: yield CPU and check shutdown flags).
@@ -75,7 +75,7 @@ class SessionError(RuntimeError):
 
 class LldbSession:
     """One debug session: SBDebugger + inferior, driven by the owner
-    thread of :mod:`symrepl.lldb_service`.
+    thread of :mod:`symrepl.dap.service`.
 
     Methods return protocol-neutral event dicts (``{"event": ...,
     "params": {...}}``) where a reply is synchronous; asynchronous

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from symrepl.branches import (
+from symrepl.replay.branches import (
     BranchSite,
     infer_outcomes,
     is_conditional,

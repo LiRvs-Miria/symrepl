@@ -44,7 +44,7 @@ _SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from symrepl.lldb_driver import (  # noqa: E402
+from symrepl.replay.driver import (  # noqa: E402
     _ensure_debug_server,
     _ensure_lldb,
     _main_module,

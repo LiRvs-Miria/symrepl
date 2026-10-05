@@ -18,7 +18,7 @@ from test_dap_server import (
 
 @pytest.fixture
 def ktest_file(tmp_path):
-    from symrepl.ktest import KTest, dump
+    from symrepl.replay.ktest import KTest, dump
 
     path = tmp_path / "chaos.ktest"
     path.write_bytes(

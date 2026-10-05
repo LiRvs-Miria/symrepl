@@ -8,7 +8,7 @@
 ## 背景
 
 M1 交付了一次性回放：`symrepl <ktest> --target <bin>` 拉起一个用完即弃的
-子进程（`python -m symrepl.lldb_driver`），持有 SBDebugger 与 inferior，
+子进程（`python -m symrepl.replay.driver`），持有 SBDebugger 与 inferior，
 跑至退出并返回 JSON 结果。M1 的三个事实约束 M2：
 
 1. LLDB 内嵌全局状态在常驻宿主中是脆弱的（`SBDebugger.Terminate()` 之后
@@ -43,7 +43,7 @@ M2 的目标（见 roadmap）：回放会话可被 VS Code 与任何 DAP 客户�
 ## 决策
 
 1. **拓扑**：DAP server 是 `symrepl` 父进程；每个调试会话对应一个
-   **常驻子进程**（`python -m symrepl.lldb_service`），在会话生命周期内
+   **常驻子进程**（`python -m symrepl.dap.service`），在会话生命周期内
    持有 SBDebugger 与 inferior，随会话销毁。父进程对客户端说 DAP；
    父子之间说内部"请求/响应 + 事件"协议。
 2. **内部协议**：`Content-Length` 帧化的 UTF-8 JSON——与 DAP 共用同一个

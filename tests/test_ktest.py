@@ -1,7 +1,7 @@
 """Tests for the `.ktest` parser and reference writer.
 
 The byte layout is pinned by a hand-computed golden fixture (independent
-of :func:`symrepl.ktest.dump`) so endianness and field order cannot
+of :func:`symrepl.replay.ktest.dump`) so endianness and field order cannot
 drift, plus exhaustive truncation cases and hypothesis round-trips.
 Layout reference: klee/klee master ``lib/Basic/KTest.cpp`` (2026-10-03).
 """
@@ -15,7 +15,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from symrepl.ktest import (
+from symrepl.replay.ktest import (
     BOUT_MAGIC,
     KTEST_MAGIC,
     KTest,

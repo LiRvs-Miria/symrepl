@@ -22,8 +22,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .ktest import KTest, KTestError, load
-from .replay import replay
+from .replay.ktest import KTest, KTestError, load
+from .replay.replay import replay
 
 _CLI_ERROR = 2
 _NOT_EXITED = 128
@@ -149,8 +149,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _dap_main(argv: list[str]) -> int:
-    """Run the M2-a DAP server skeleton (see :mod:`symrepl.dap_server`)."""
-    from . import dap_server  # deferred: keeps the replay path lean
+    """Run the M2-a DAP server skeleton (see :mod:`symrepl.dap.server`)."""
+    from .dap import server as dap_server  # deferred: keeps the replay path lean
 
     code = dap_server.main(argv)
     return _CLI_ERROR if code != 0 else 0

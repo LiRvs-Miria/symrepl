@@ -8,7 +8,7 @@ English version is authoritative. 简体中文见
 ## Context
 
 M1 delivered one-shot replay: `symrepl <ktest> --target <bin>` spawns a
-throwaway child (`python -m symrepl.lldb_driver`) that holds SBDebugger
+throwaway child (`python -m symrepl.replay.driver`) that holds SBDebugger
 and the inferior, runs to exit, and returns a JSON result. Three facts
 from M1 constrain M2:
 
@@ -52,7 +52,7 @@ client. Research against the DAP specification, `lldb-dap`,
 
 1. **Topology**: the DAP server is the `symrepl` parent process; each
    debug session gets one **long-lived child**
-   (`python -m symrepl.lldb_service`) that holds SBDebugger and the
+   (`python -m symrepl.dap.service`) that holds SBDebugger and the
    inferior for the session's lifetime and is destroyed with it. The
    parent speaks DAP to the client; parent and child speak an internal
    request/response + event protocol.

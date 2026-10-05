@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from symrepl.ktest import KTest, load
-from symrepl.replay import replay
+from symrepl.replay.ktest import KTest, load
+from symrepl.replay.replay import replay
 
 KTESTS = Path(__file__).parents[1] / "third_party" / "klee" / "ktest"
 
