@@ -9,6 +9,7 @@ sync in the same commit.
 |---|---|---|
 | Roadmap (milestones M0–M4) | [en/roadmap.md](en/roadmap.md) | [zh-CN/roadmap.md](zh-CN/roadmap.md) |
 | Five-minute background | [en/background.md](en/background.md) | [zh-CN/background.md](zh-CN/background.md) |
+| Project management guide | [en/project-management.md](en/project-management.md) | [zh-CN/project-management.md](zh-CN/project-management.md) |
 
 ## Architecture Decision Records
 
@@ -16,6 +17,7 @@ sync in the same commit.
 |---|---|---|
 | 0001 — Scope and IP firewall | [en/adr/0001-scope-and-ip-firewall.md](en/adr/0001-scope-and-ip-firewall.md) | [zh-CN/adr/0001-scope-and-ip-firewall.md](zh-CN/adr/0001-scope-and-ip-firewall.md) |
 | 0002 — M1 input contract: single `.ktest` + dynamic branch tracing | [en/adr/0002-m1-input-contract.md](en/adr/0002-m1-input-contract.md) | [zh-CN/adr/0002-m1-input-contract.md](zh-CN/adr/0002-m1-input-contract.md) |
+| 0003 — M2 architecture: DAP server on a parent/child topology | [en/adr/0003-m2-dap-server-architecture.md](en/adr/0003-m2-dap-server-architecture.md) | [zh-CN/adr/0003-m2-dap-server-architecture.md](zh-CN/adr/0003-m2-dap-server-architecture.md) |
 
 ## Layout
 
