@@ -1,7 +1,7 @@
-# local-test-phase1 推进状态（冻结于 2026-10-10）
+# local-test-phase1 推进状态（冻结于 2026-10-10：§0–§5 完成，停在 §7 验收复述前）
 
 > 本文件是**会话进度快照**，供在新环境（VM opencode）恢复阶段一学习流程。
-> 配套：[`local-test-phase1.md`](local-test-phase1.md)（任务书）、`../research-survey/plan/ai-independence.md`（承重协议）、`../research-survey/plan/ai-ledger.md`（对账账本，已有 3 条记录）。
+> 配套：[`local-test-phase1.md`](local-test-phase1.md)（任务书）、`../research-survey/plan/ai-independence.md`（承重协议）、`../research-survey/plan/ai-ledger.md`（对账账本，已有 6 条记录：P1–P3、补遗、P4、P5）。
 > **恢复方法：先读本文件，再按"下一步"节继续。承重协议必须维持：预测先行，AI 不得代写预测。**
 
 ## 已完成
