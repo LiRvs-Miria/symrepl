@@ -1,24 +1,23 @@
+"""schedule — 壳（Imperative Shell）：accept/拒连/读循环/信号/退出码。
+
+分层：framing=分帧（结构件）→ statemachine=协议核心（转录自 design-notes.md）
+→ 本文件只做 I/O 与收场。日志只走 stderr：stdout 将来是说 DAP 协议的。
+"""
 import asyncio
 import contextlib
 import functools
 import signal
 import sys
-from dataclasses import dataclass, field
 
 from error import TransExitCode
+from framing import FrameError, encode_frame, read_frame
+from statemachine import Phase, State, dispatch
 
-# 日志只走 stderr：stdout 将来是说 DAP 协议的（stdio transport），不许污染
+
 def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 #end def
 
-@dataclass
-class State:
-    active_writer: asyncio.StreamWriter | None = None
-    client_done: asyncio.Event = field(default_factory=asyncio.Event)
-    # 终态粗类，默认体面收场；只有 ABRUPT 分支会改写
-    exit_code: TransExitCode = TransExitCode.FIN
-#end class
 
 async def handle(reader: asyncio.StreamReader,
                  writer: asyncio.StreamWriter,
@@ -36,16 +35,28 @@ async def handle(reader: asyncio.StreamReader,
     state.active_writer = writer
     peer = writer.get_extra_info("peername")
     log(f"connected peer={peer}")
-    #正常读TCP数据，TCP数据送完结束
     try:
         while True:
-            data = await reader.read(4096)
-            if not data:
-                # FIN：对端体面告别（read() 返回 b""），不是异常
+            try:
+                msg = await read_frame(reader)
+            except FrameError as e:
+                # 坏帧→ABRUPT：对齐参考"malformed client frame"exit=2 实证；正式决策留阶段3
+                state.exit_code = TransExitCode.ABRUPT
+                log(f"session_end reason=bad_frame peer={peer} err={e}")
+                break
+            #end try
+            if msg is None:
+                # FIN：对端体面告别，不是异常
                 log(f"session_end reason=eof peer={peer}")
                 break
-            writer.write(data)
-            await writer.drain()
+            #end if
+            for out in dispatch(state, msg):
+                writer.write(encode_frame(out))
+                await writer.drain()
+            #end for
+            if state.phase == Phase.DEAD:
+                break                    # disconnect 应答已送达，会话完毕
+        #end while
     # RST：连接被对端/内核枪毙（ECONNRESET，常现于 read/drain）
     except ConnectionResetError as e:
         state.exit_code = TransExitCode.ABRUPT
@@ -55,6 +66,7 @@ async def handle(reader: asyncio.StreamReader,
         state.exit_code = TransExitCode.ABRUPT
         log(f"session_end reason=epipe peer={peer} err={e!r}")
     finally:
+        state.slot = None                # 清：交易作废（单出口结构红利）
         writer.close()
         with contextlib.suppress(Exception):
             await writer.wait_closed()
@@ -71,6 +83,7 @@ def on_signal(state: State):
         state.active_writer.close()
     else:
         state.client_done.set()
+    #end if
 #end def
 
 
@@ -93,9 +106,10 @@ async def main(host: str, port: int):
     server.close()
     await server.wait_closed()
     # 终态粗类 → 进程退出码（8 位内；信号路径不改 exit_code，保持 FIN=0）
-    sys.exit(int(state.exit_code))
+    sys.exit(state.exit_code)
 #end def
 
+
 if __name__ == "__main__":
-    asyncio.run(main("localhost", 5678))
+    asyncio.run(main("127.0.0.1", int(sys.argv[1]) if len(sys.argv) > 1 else 5678))  # §0 观察点：单栈 127.0.0.1（localhost 双栈会在半绑定失败时拖死全体，2026-10-14 实测）
 #end if

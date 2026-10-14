@@ -15,6 +15,7 @@ class InternalErrCode(IntEnum):
     OK = 0
     BAD_PROTOCOL = 1001
     PAYLOAD_TOO_LARGE = 1002
+    EVENT_NOT_ALLOWED = 1003   # 事件在当前协议状态不允许（A1 决策：粗类码，细节走 detail）
     UPSTREAM_TIMEOUT = 2001
     UPSTREAM_REFUSED = 2002
 #end class
