@@ -1,10 +1,12 @@
-"""statemachine — 会话协议状态机（核心，纯函数版，契约 v2）。
+"""statemachine — 会话协议状态机（核心，纯函数版，契约 v3）。
 
-step 专职状态转移（模式匹配分发），build_replies 专职回包（seq 账本在此）；
-slot 存 PendingLaunch(request) 不存预造帧；核内零 I/O、零原地突变。
-结果 ADT 的验收单=七种结果（design-notes 契约 v2）。
+pipeline：parse_request（边界解析，dict→类型）→ step（模式匹配状态转移）
+→ build_replies（回包+seq 账本）。核内零 I/O、零原地突变、零裸字符串。
+
+状态与转移全部来自 design-notes.md 定稿：事件=转移条件，状态=能待着的东西。
+slot 即状态：PendingLaunch 非空 = S2。结果 ADT 验收单=七种结果（契约 v2）。
 """
-from enum import IntEnum
+from enum import Enum, IntEnum
 from typing import NamedTuple
 from error import InternalErrCode, ProtoError
 
@@ -17,15 +19,32 @@ class StateEnum(IntEnum):
     DEAD = 4      # 终态
 #end class
 
+
+class Command(Enum):
+    # 不用 IntEnum：命令不做算术，误用应报错；拼错成员名=NameError（大声失败）
+    INITIALIZE = "initialize"
+    LAUNCH = "launch"
+    CONFIGURATION_DONE = "configurationDone"
+    DISCONNECT = "disconnect"
+#end class
+
+_COMMANDS = {c.value: c for c in Command}   # wire 名 → 枚举
+
 CAPABILITIES = {"supportsConfigurationDoneRequest": True,
                 "supportsTerminateRequest": True}
 
-KNOWN_COMMANDS = frozenset({"initialize", "launch", "configurationDone", "disconnect"})
+
+class ParsedRequest(NamedTuple):
+    seq: int | None          # 敌意客户端可能缺/坏 seq：如实透传，不假装有
+    command: Command | None   # None 仅出现在 unknown 的 Reply 里，step 永远收不到
+    raw_command: str          # 原串保留：线上应答回显客户端发的原名
+    arguments: dict
+#end class
 
 
 class PendingLaunch(NamedTuple):
     # slot 内容不可变延伸：堵浅拷贝别名漏水（深层只读靠纪律：request 解析后视为只读）
-    request: dict            # 扣着的 launch 请求；放行时由 build_replies 现场造应答（契约 v2）
+    request: ParsedRequest   # 扣着的 launch 请求；放行时由 build_replies 现场造应答（契约 v2）
 #end class
 
 
@@ -37,7 +56,7 @@ class ProtoState(NamedTuple):
 
 class Reply(NamedTuple):
     """一帧应答的语义描述（线上形状由 build_replies 决定）。"""
-    request: dict
+    request: ParsedRequest
     success: bool
     payload: dict | None = None
     error: ProtoError | None = None
@@ -50,13 +69,31 @@ class ExpectState(NamedTuple):
 #end class
 
 
+# ---------- 边界解析（parse, don't validate） ----------
+
+def parse_request(msg: dict):
+    """dict → ParsedRequest | Reply。未知命令返回 not-implemented Reply，永不进 step。"""
+    cmd = msg.get("command")
+    if not isinstance(cmd, str) or cmd not in _COMMANDS:
+        req = ParsedRequest(seq=msg.get("seq"), command=None,
+                            raw_command=cmd if isinstance(cmd, str) else repr(cmd),
+                            arguments={})
+        return err_reply(req, InternalErrCode.BAD_PROTOCOL,
+                         "not implemented", f"unknown command {cmd!r}")
+    #end if
+    args = msg.get("arguments")
+    return ParsedRequest(seq=msg.get("seq"), command=_COMMANDS[cmd], raw_command=cmd,
+                         arguments=args if isinstance(args, dict) else {})
+#end def
+
+
 # ---------- 应答构造助手 ----------
 
-def ok_reply(request: dict, payload: dict | None = None) -> Reply:
+def ok_reply(request: ParsedRequest, payload: dict | None = None) -> Reply:
     return Reply(request=request, success=True, payload=payload)
 #end def
 
-def err_reply(request: dict, code: InternalErrCode, message: str, detail: str) -> Reply:
+def err_reply(request: ParsedRequest, code: InternalErrCode, message: str, detail: str) -> Reply:
     # A1 分层：粗类码 + 现象在 message，原因在 detail
     return Reply(request=request, success=False,
                  error=ProtoError(code=code, message=message, detail={"detail": detail}))
@@ -76,69 +113,54 @@ def validate_launch(args: dict):
 
 # ---------- step：模式匹配分发（转移表逐行转录） ----------
 
-def step(pstate: ProtoState, msg: dict) -> ExpectState:
-    cmd = msg.get("command")
-    if cmd not in KNOWN_COMMANDS:
-        # 未知命令回规范错误（对齐 §5 实证），分发层处理，不过状态机
-        return ExpectState(pstate,
-                           (err_reply(msg, InternalErrCode.BAD_PROTOCOL,
-                                      "not implemented", f"unknown command {cmd!r}"),))
-    #end if
-
+def step(pstate: ProtoState, req: ParsedRequest) -> ExpectState:
     phase = pstate.phase
-    match phase, cmd:
-        case (StateEnum.S0, "initialize"):
+    match phase, req.command:
+        case (StateEnum.S0, Command.INITIALIZE):
             return ExpectState(pstate._replace(phase=StateEnum.S1),
-                               (ok_reply(msg, CAPABILITIES),))
+                               (ok_reply(req, CAPABILITIES),))
 
-        case (StateEnum.S1, "launch"):
-            e = validate_launch(msg.get("arguments") or {})
+        case (StateEnum.S1, Command.LAUNCH):
+            e = validate_launch(req.arguments)
             if e is not None:
                 return ExpectState(pstate,
-                                   (err_reply(msg, InternalErrCode.BAD_PROTOCOL,
+                                   (err_reply(req, InternalErrCode.BAD_PROTOCOL,
                                               "bad launch parameters", e),))
             #end if
             # 放：请求入 slot，扣响应（线上静默——设计灵魂）
             return ExpectState(pstate._replace(phase=StateEnum.S2,
-                                               slot=PendingLaunch(request=msg)), ())
+                                               slot=PendingLaunch(request=req)), ())
 
-        case (StateEnum.S2, "configurationDone"):
+        case (StateEnum.S2, Command.CONFIGURATION_DONE):
             pending = pstate.slot
             if pending is None:   # 不变量说 S2 蕴含非空；防御一把
                 return ExpectState(pstate,
-                                   (err_reply(msg, InternalErrCode.EVENT_NOT_ALLOWED,
+                                   (err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
                                               "event not allowed in current state",
                                               "no launch in flight"),))
             #end if
-            # 放行：launch 应答现场构造（存 request 不存帧——契约 v2），launch 先发（偏离#6）
+            # 放行：launch 应答从 stash 的 request 现场构造（契约 v2），launch 先发（偏离#6）
             return ExpectState(pstate._replace(phase=StateEnum.S3, slot=None),
-                               (ok_reply(pending.request, {}), ok_reply(msg, {})))
+                               (ok_reply(pending.request, {}), ok_reply(req, {})))
 
-        case (_, "disconnect"):
+        case (_, Command.DISCONNECT):
             # 断路器：任何状态无守卫直达终态（偏离#5）；清 slot=丢弃整个状态
             return ExpectState(pstate._replace(phase=StateEnum.DEAD, slot=None),
-                               (ok_reply(msg, {}),))
+                               (ok_reply(req, {}),))
 
-        case (StateEnum.S2, "launch"):
-            # 双发：专属 detail（转移表 S2 行，泛化分支会吞掉它）
+        case (StateEnum.S2, Command.LAUNCH):
+            # 双发：专属 detail（转移表 S2 行，R7 教训——泛化分支会吞掉它）
             return ExpectState(pstate,
-                               (err_reply(msg, InternalErrCode.EVENT_NOT_ALLOWED,
+                               (err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
                                           "event not allowed in current state",
                                           "launch_already_pending"),))
 
-        case (_, "launch") | (_, "initialize") | (_, "configurationDone"):
-            # 状态门：该事件在当前状态不允许（有意偏离参考状态盲，偏离#1；重入拒，偏离#2）
-            return ExpectState(pstate,
-                               (err_reply(msg, InternalErrCode.EVENT_NOT_ALLOWED,
-                                          "event not allowed in current state",
-                                          f"{cmd} not allowed in {phase.name}"),))
-
         case _:
-            # S3 占位与一切未定义组合：占位态不接待客（出②范围）
+            # 状态门 + 占位态：该事件在当前状态不允许（偏离#1 状态门、#2 重入拒）
             return ExpectState(pstate,
-                               (err_reply(msg, InternalErrCode.EVENT_NOT_ALLOWED,
+                               (err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
                                           "event not allowed in current state",
-                                          f"no transition from {phase.name}"),))
+                                          f"{req.raw_command} not allowed in {phase.name}"),))
     #end match
 #end def
 
@@ -149,8 +171,8 @@ def build_replies(replies: tuple[Reply, ...], seq: int):
     # 线上形状在此定型：错误帧 body={code, detail}，成功帧 body=payload
     frames = []
     for r in replies:
-        m = {"seq": seq, "type": "response", "request_seq": r.request["seq"],
-             "command": r.request["command"], "success": r.success}
+        m = {"seq": seq, "type": "response", "request_seq": r.request.seq,
+             "command": r.request.raw_command, "success": r.success}
         seq += 1
         if r.success:
             if r.payload is not None:

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from error import TransExitCode
 from framing import FrameError, encode_frame, read_frame
-from statemachine import ProtoState, StateEnum, build_replies, step
+from statemachine import Reply, ProtoState, StateEnum, build_replies, parse_request, step
 
 
 def log(msg: str) -> None:
@@ -69,9 +69,16 @@ async def handle(reader: asyncio.StreamReader,
                 continue
             #end if
 
-            expect = step(conn.pstate, msg)
-            frames, conn.seq = build_replies(expect.replies, conn.seq)
-            conn.pstate = expect.state        # 协议状态由返回值搬运（纯核，无原地突变）
+            parsed = parse_request(msg)       # 边界解析：dict → 类型（parse, don't validate）
+            if isinstance(parsed, Reply):
+                # 未知命令：parse 阶段直接产出应答，不进状态机
+                replies, new_pstate = (parsed,), conn.pstate
+            else:
+                expect = step(conn.pstate, parsed)
+                replies, new_pstate = expect.replies, expect.state
+            #end if
+            frames, conn.seq = build_replies(replies, conn.seq)
+            conn.pstate = new_pstate          # 协议状态由返回值搬运（纯核，无原地突变）
             for out in frames:
                 writer.write(encode_frame(out))
                 await writer.drain()
