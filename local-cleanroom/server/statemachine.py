@@ -28,7 +28,17 @@ class Command(Enum):
     DISCONNECT = "disconnect"
 #end class
 
-_COMMANDS = {c.value: c for c in Command}   # wire 名 → 枚举
+def match_command(cmd: str) -> "Command | None":
+    """字符串 → 命令枚举。这里是"已处理命令"的宣言清单：
+    每个 case 是一次显式的处理承诺；enum 加了成员而这里没 case = 该命令未实现。"""
+    match cmd:
+        case "initialize":        return Command.INITIALIZE
+        case "launch":            return Command.LAUNCH
+        case "configurationDone": return Command.CONFIGURATION_DONE
+        case "disconnect":        return Command.DISCONNECT
+        case _:                   return None
+    #end match
+#end def
 
 CAPABILITIES = {"supportsConfigurationDoneRequest": True,
                 "supportsTerminateRequest": True}
@@ -63,6 +73,8 @@ class Reply(NamedTuple):
 #end class
 
 
+MaybeParsedRequest = ParsedRequest | Reply   # parse 的输出代数：正常→step，异常→直接回包
+
 class ExpectState(NamedTuple):
     state: ProtoState
     replies: tuple[Reply, ...] = ()   # 0 帧=扣/无话，1 帧=应答，2 帧=放行
@@ -71,10 +83,11 @@ class ExpectState(NamedTuple):
 
 # ---------- 边界解析（parse, don't validate） ----------
 
-def parse_request(msg: dict):
-    """dict → ParsedRequest | Reply。未知命令返回 not-implemented Reply，永不进 step。"""
+def parse_request(msg: dict) -> MaybeParsedRequest:
+    """dict → ParsedRequest | Reply。数据清洗：正常请求→step，异常→直接接到返回报文。"""
     cmd = msg.get("command")
-    if not isinstance(cmd, str) or cmd not in _COMMANDS:
+    command = match_command(cmd) if isinstance(cmd, str) else None
+    if command is None:
         req = ParsedRequest(seq=msg.get("seq"), command=None,
                             raw_command=cmd if isinstance(cmd, str) else repr(cmd),
                             arguments={})
@@ -82,7 +95,7 @@ def parse_request(msg: dict):
                          "not implemented", f"unknown command {cmd!r}")
     #end if
     args = msg.get("arguments")
-    return ParsedRequest(seq=msg.get("seq"), command=_COMMANDS[cmd], raw_command=cmd,
+    return ParsedRequest(seq=msg.get("seq"), command=command, raw_command=cmd,
                          arguments=args if isinstance(args, dict) else {})
 #end def
 

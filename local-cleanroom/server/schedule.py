@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from error import TransExitCode
 from framing import FrameError, encode_frame, read_frame
-from statemachine import Reply, ProtoState, StateEnum, build_replies, parse_request, step
+from statemachine import MaybeParsedRequest, Reply, ProtoState, StateEnum, build_replies, parse_request, step
 
 
 def log(msg: str) -> None:
@@ -69,7 +69,7 @@ async def handle(reader: asyncio.StreamReader,
                 continue
             #end if
 
-            parsed = parse_request(msg)       # 边界解析：dict → 类型（parse, don't validate）
+            parsed: MaybeParsedRequest = parse_request(msg)  # 边界解析：正常→step，异常→直接回包
             if isinstance(parsed, Reply):
                 # 未知命令：parse 阶段直接产出应答，不进状态机
                 replies, new_pstate = (parsed,), conn.pstate
