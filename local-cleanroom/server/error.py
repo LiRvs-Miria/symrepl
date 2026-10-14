@@ -21,7 +21,7 @@ class InternalErrCode(IntEnum):
 #end class
 
 class ProtoError(NamedTuple):
-    code: InternalErrCode
+    code: InternalErrCode        # 无默认：类型系统逼每处显式选码（默认 OK = 静默成功地雷）
     message: str = ""
     detail: dict | None = None
 #end class

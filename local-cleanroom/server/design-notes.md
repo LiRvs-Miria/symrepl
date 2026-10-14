@@ -91,3 +91,43 @@ def on_teardown():                     # 清理题答案
 
 - **"会话结束即退"使 TCP 就绪探测变自杀**：单会话拓扑下，连上即断的端口探测=一次完整会话=进程退场。就绪检查必须用 `ss -tln` 查监听，不得试连。结构的刚性在此显形——参考实现同样如此（"单 accept、会话结束即退"）
 - **localhost 双栈半绑定失败拖死全体**：绑 127.0.0.1 成功、::1 被占 → asyncio 关掉已绑的 v4 半边 → 整进程死。故单栈 127.0.0.1（§0 观察点）
+
+## FC 重构刀法（进行中，用户亲刀）
+
+**刀劈 State**：不劈 State 的函数式重构是纯仪式。三类成员三种命运：
+
+| 成员 | 去向 |
+|---|---|
+| phase / slot / next_seq | **ProtocolState**（核的全部记忆，纯数据） |
+| active_writer / client_done | 壳（世界对象，不可复制） |
+| exit_code | 壳（壳的账本） |
+
+**核的契约 v2（2026-10-14，pipeline 修订——用户设计，替代 v1 内联帧方案）**：
+
+```python
+ProtocolState: phase + slot(PendingLaunch|None，存 request 不存预造帧)   # next_seq 移出：线格式关注点
+step(pstate, msg) -> ExpectState          # 专职状态转移，产出语义结果
+build_replies(expect, seq_counter) -> frames   # 专职回包（含放行双帧的现场构造），自带计数器账本
+# 壳把两段接成 pipeline：msg → step → build_replies → 上线
+```
+
+- seq 所有权归 build_replies：四 handler 均不读 seq 做决策，线格式关注点不入协议语义（用户判定）
+- **结果 ADT（ExpectState 内的 outcome）待用户设计**——验收单：须能表达 7 种结果
+  （caps 应答 / 状态错 / 参数错 / 双发错 / **launch=0 帧入 slot** / **configDone=放行双帧** / disconnect 应答）
+- slot 不可变延伸：`PendingLaunch(NamedTuple)`，dict 直接入 slot 会别名漏水（浅拷贝反例已演示）
+- ProtoError.code 默认 OK：用户暂用默认搭框架；保守意见=去默认逼显式（静默成功是地雷），未裁决
+
+**不变量**：
+
+1. 核内零 I/O、零原地突变——变更走 `dataclasses.replace`（浅拷贝够用）
+2. 壳职责不变：accept/拒连、读写帧、信号、退出码、client_done；壳对协议状态的唯一动作是 `step()` + **收场时丢弃 ProtocolState 对象**（"清 slot=交易作废"升维为丢弃整个状态）
+3. 行为等价：`probe_transition_table.py` 12 探针必须原样全过（含 R8 帧序=launch 先，偏离清单#6 不动）
+4. 壳判终态改用 **step 返回的新状态**（原 Mutation 版靠活对象，纯版没了）
+5. 收场路径 slot 清理：壳丢弃状态即清，无需显式 None
+
+**预埋攻击点**（转录时最容易翻车的四处，自查）：
+
+- `response()` 现在原地 `next_seq += 1`——纯版必须把 seq 线程化（进状态、出新状态）
+- `on_launch` 现在返回 None 表示"无输出但状态变了"——纯版元组里空列表显式表达，None 惯例消失
+- `on_configurationDone` 返回两帧——元组第二元素是列表，别拆散
+- 壳的 `if state.phase == Phase.DEAD: break`——改用 step 返回值判断，且断路器仍然"回完应答再退"
