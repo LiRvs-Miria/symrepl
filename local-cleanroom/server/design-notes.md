@@ -215,3 +215,32 @@ caps=`(Response(ok,CAPS),)`；状态错/参数错/双发错=`(Response(err 码+d
 **构造约定（2026-10-15 用户裁定）**：ADT 构造一律**具名成员**——`StepResult(state=…, frames=…)`、`Event(event=…, body=…)`、`OkReply(request=…)`，位置式禁用（可读性：`frames=(OkReply(request=req), Event(event="terminated"))` 自释帧序与种类）。
 
 **收场事件对齐（2026-10-15 裁决 a）**：disconnect 与 shutdown **两门形状统一**——resp 之后都发 terminated 再收场。缘起：clean-room 的 disconnect 原本光杆（R9 只验 resp，从不验事件），而参考的 disconnect 后 terminated 是 child 杀 inferior 的副产品（server.py:790 翻译），clean-room 无 child 故无此帧——shutdown 人工补了、disconnect 没有，两门分叉无原则。裁决=都补：①对齐参考实测（capture 两回记录 resp→terminated）；②客户端收场序列与走哪扇门无关。R9/R10 探针已补 terminated 断言（网洞：事件有无从未被断言过——网只查你想到要查的，第三次显灵）。
+
+## framing 重构设计档案（2026-10-15 用户定稿：值 ADT/外包缓冲/错误分家）
+
+**总纲（用户原话）**：FP=类型驱动的严格性+错误前置，不是为函数式而函数式。重构脊柱=堵三洞。
+
+**三洞→分类映射**：
+
+| 洞 | 线上场景 | 现状 | 归类 |
+|---|---|---|---|
+| 洞1 巨型长度 | `Content-Length: 2000000000` → readexactly 干等/巨分配 | 无闸 | **LENGTH_OVERSIZE**（声明即拒，64MiB 闸对齐参考） |
+| 洞2 宽松解析 | `+12`/`1_2`/带空格 被 int() 吞成合法 | 等到 body 阶段才炸 | **LENGTH_FORMAT**（纯数字闸，头解析期拒） |
+| 洞3 超限头裸穿 | >64KiB 无分隔符头 → LimitOverrunError 炸穿壳的 except | 裸异常逃出 FrameError 契约 | **HEADER_LIMIT**（收编） |
+
+**三项裁决**：①错误形态=**值 ADT**（ErrReply 提案被否——坏帧构不成 request_seq/command，且 no-resync 语义下 pipeline 不继续：坏帧后流已烂，下帧边界未知）；②缓冲=**继续外包 asyncio**（StreamReader 即状态机，不自建）；③错误**现在分家**（任务 B 语义定型，不留糊一层）。
+
+**输出代数**：
+
+```python
+FrameBadReason(Enum): LENGTH_OVERSIZE / LENGTH_FORMAT / HEADER_LIMIT / STREAM_TRUNCATED / BAD_BODY
+FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
+```
+
+**壳接线**：FrameEof → FIN（exit 0）；FrameBad → ABRUPT（exit 2；no-resync=参考 decision 2 对齐：坏帧后无恢复路径）；FrameOK → 进 parse_request。半帧/未读完就关=STREAM_TRUNCATED；body 非 UTF-8/JSON=BAD_BODY。
+
+**已知注记**：无冒号头行继续忽略（参考会拒——对齐留任务 B）；MAX_FRAME_BYTES=64MiB 对齐参考；IncompleteReadError 是 EOFError 子类，except 顺序注意；stderr 日志须含 reason 名（探针 grep 依此判分类）。
+
+**验收**：probe_framing.py（RED 起步）：R-F1 超长声明（客户端不发 body、socket 保持打开——拒绝不得等字节来齐）→LENGTH_OVERSIZE+ABRUPT；R-F2 `+12`→LENGTH_FORMAT+ABRUPT；R-F3 10 万字节无分隔符头→HEADER_LIMIT+ABRUPT（不 crash 不漏连接）；R-F4 半帧→STREAM_TRUNCATED+ABRUPT；R-F5 干净 FIN→exit0；回归门=转移表 14+shutdown 8 原样全过。**实现=用户**（framing.py 重写 read_frame 返回 ADT+enum+闸；schedule.py 调用点接线），转录（本契约+探针）=AI。
+
+**复述挂账**：ErrReply 为何进不了 framing（构不成 request_seq+no-resync）/五分类与任务 B 映射/buffer 外包的代价收益（StreamReader 即状态机）

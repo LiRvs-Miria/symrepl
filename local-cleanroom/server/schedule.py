@@ -51,23 +51,24 @@ async def handle(reader: asyncio.StreamReader,
     log(f"connected peer={peer}")
     try:
         while True:
-            try:
-                msg = await read_frame(reader)
-            except FrameError as e:
-                # 坏帧→ABRUPT：对齐参考"malformed client frame"exit=2 实证；正式决策留阶段3
-                conn.exit_code = TransExitCode.ABRUPT
-                log(f"session_end reason=bad_frame peer={peer} err={e}")
-                break
-            #end try
-            if msg is None:
-                # FIN：对端体面告别，不是异常
-                log(f"session_end reason=eof peer={peer}")
-                break
-            #end if
-            if msg.get("type") != "request":
-                log(f"ignored non-request frame type={msg.get('type')!r}")
-                continue
-            #end if
+            
+            #try:
+            #    msg = await read_frame(reader)
+            #except FrameError as e:
+            #    # 坏帧→ABRUPT：对齐参考"malformed client frame"exit=2 实证；正式决策留阶段3
+            #    conn.exit_code = TransExitCode.ABRUPT
+            #    log(f"session_end reason=bad_frame peer={peer} err={e}")
+            #    break
+            ##end try
+            #if msg is None:
+            #    # FIN：对端体面告别，不是异常
+            #    log(f"session_end reason=eof peer={peer}")
+            #    break
+            ##end if
+            #if msg.get("type") != "request":
+            #    log(f"ignored non-request frame type={msg.get('type')!r}")
+            #    continue
+            ##end if
 
             parsed: MaybeParsedRequest = parse_request(msg)  # 边界解析：正常→step，异常→直接回包
             if isinstance(parsed, Reply):

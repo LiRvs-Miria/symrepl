@@ -3,7 +3,7 @@ from pathlib import Path
 sys.path.insert(0, "/home/odot/github/symrepl/local-cleanroom/client")
 import dap_client as dc
 
-SRV_DIR = str(Path(__file__).resolve().parent)
+SRV_DIR = str(Path(__file__).resolve().parent.parent / "server")
 KT = "/home/odot/github/symrepl/third_party/klee/ktest/get_sign_test000003.ktest"
 TG = "/tmp/opencode/replay-build/get_sign"
 fails = []

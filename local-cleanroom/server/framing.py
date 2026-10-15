@@ -7,38 +7,65 @@ read_frame 返回 dict；对端体面关闭（FIN）返回 None；坏帧抛 Fram
 import asyncio
 import json
 
+class FrameBadReason(Enum):
+    LENGTH_OVERSIZE     # 洞1：声明 > 64MiB，声明即拒
+    LENGTH_FORMAT       # 洞2：CL 缺失/非纯数字（isdigit 闸）
+    HEADER_LIMIT        # 洞3：readuntil 撞 LimitOverrunError，收编
+    STREAM_TRUNCATED    # 半帧：头中/体中断流
+    BAD_BODY            # body 非 UTF-8/JSON/object
+#end class
 
-class FrameError(Exception):
+class FrameOk(NamedTuple):
+    payload: dict
+#end class
+
+class FrameEof(NamedTuple):
     pass
 #end class
 
+class FrameBad(NamedTuple):
+    reason: FrameBadReason
+    detail: str
+#end class
 
-def encode_frame(msg: dict) -> bytes:
-    body = json.dumps(msg, ensure_ascii=False).encode("utf-8")
-    return b"Content-Length: %d\r\n\r\n" % len(body) + body
+FrameOut = FrameOk | FrameEof | FrameBad
+
+async def read_frame(reader: asyncio.StreamReader) -> FrameOut
+    return FrameEof()
 #end def
 
 
-async def read_frame(reader: asyncio.StreamReader):
-    try:
-        head = await reader.readuntil(b"\r\n\r\n")
-    except asyncio.IncompleteReadError as e:
-        if not e.partial:
-            return None                      # 对端体面走人（FIN）
-        raise FrameError("client died mid-header")
-    #end try
-    try:
-        headers = dict(l.split(b":", 1) for l in head.split(b"\r\n") if b":" in l)
-        length = int(headers[b"Content-Length"])
-        body = await reader.readexactly(length)
-    except (KeyError, ValueError) as e:
-        raise FrameError(f"bad header: {e!r}")
-    except asyncio.IncompleteReadError:
-        raise FrameError("client died mid-body")
-    #end try
-    try:
-        return json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        raise FrameError(f"bad body: {e!r}")
-    #end try
-#end def
+#class FrameError(Exception):
+#    pass
+##end class
+#
+#
+#def encode_frame(msg: dict) -> bytes:
+#    body = json.dumps(msg, ensure_ascii=False).encode("utf-8")
+#    return b"Content-Length: %d\r\n\r\n" % len(body) + body
+##end def
+#
+#
+#async def read_frame(reader: asyncio.StreamReader):
+#    try:
+#        head = await reader.readuntil(b"\r\n\r\n")
+#    except asyncio.IncompleteReadError as e:
+#        if not e.partial:
+#            return None                      # 对端体面走人（FIN）
+#        raise FrameError("client died mid-header")
+#    #end try
+#    try:
+#        headers = dict(l.split(b":", 1) for l in head.split(b"\r\n") if b":" in l)
+#        length = int(headers[b"Content-Length"])
+#        body = await reader.readexactly(length)
+#    except (KeyError, ValueError) as e:
+#        raise FrameError(f"bad header: {e!r}")
+#    except asyncio.IncompleteReadError:
+#        raise FrameError("client died mid-body")
+#    #end try
+#    try:
+#        return json.loads(body.decode("utf-8"))
+#    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+#        raise FrameError(f"bad body: {e!r}")
+#    #end try
+##end def
