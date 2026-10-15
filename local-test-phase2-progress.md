@@ -1,8 +1,23 @@
-# local-test-phase2 推进状态（阶段二开工 2026-10-13：M2 DAP 链路；§3/§4/§5 完成，§6 改为动手验收；两线合流为四阶段。**2026-10-14 续：阶段 1 v6 改道为代码骨架直接交付（用户写 AI 攻协议不变），①主循环+③收场矩阵+④退出码表已关账（五探针全过，RST→exit2 落地）；余② slot；**2026-10-15：复述结算（7/8 过+六偏离转期）+ phase 裁决=去默认——阶段 1 关账，解封进阶段 2**）
+# local-test-phase2 推进状态（阶段二开工 2026-10-13：M2 DAP 链路；§3/§4/§5 完成，§6 改为动手验收；两线合流为四阶段。2026-10-14：阶段 1 v6 改道代码骨架交付，①③④关账；2026-10-15：**收官——四阶段全关账**：①clean-room 重写（复述结算 7/8，六偏离源码全证清账）②深读 server.py（OQ-1~4 黑盒+源码双通道对案）③shutdown 断路器 ④framing 值 ADT+三洞三闸——③④经用户裁决改道 clean-room，真代码库原案打包押后（见挂账墙）；探针网 30 项全绿（probes/），双仓已推）
 
 > 本文件是**会话进度快照**，供在新环境（VM opencode）恢复阶段二学习流程。
-> 配套：[`local-test-phase2.md`](local-test-phase2.md)（任务书）、`../research-survey/plan/ai-independence.md`（承重协议）、`../research-survey/plan/ai-ledger.md`（对账账本，截至 2026-10-13 共 8 条：phase1 六条 + phase2 §4 对账 + §5 归因更正）。
+> 配套：[`local-test-phase2.md`](local-test-phase2.md)（任务书）、`../research-survey/plan/ai-independence.md`（承重协议）、`../research-survey/plan/ai-ledger.md`（对账账本，截至 2026-10-15 共 24 条：phase1 六条 + phase2 全程含方法论修正）。
 > **承重协议必须维持：预测先行，AI 不得代写先验。**（P1–P3 已于 2026-10-13 锁定并对账，"先验前不读源码"约束已解除；动手验收的新先验规则：语义/设计先验先写，再读对应源码——见待办阶段 1/3）
+> **2026-10-15 补充协议**：复述原则题一律给**结构入口**不考名字回忆；设计定稿时原则由用户亲口铸名（详见账本"复述方法论修正"行）。
+
+## 挂账墙（冷启动从此取活，2026-10-15 冻结）
+
+| 项 | 内容 | 挂在哪 |
+|---|---|---|
+| 真代码库 shutdown 原案 | 四段读法（分发表 :105-122 / _closing 路径 / 内部收场 :722 / 退出码 cli.py:151-156）+ pytest 187 + testShutdownAfterDisconn 实测 | 阶段 3 留档 |
+| 真代码库 framing 原案 | 独立分支（自 main 切，src/tests 两分支零差异已验）+ 187 pytest 保绿 + ADR 备注 | 阶段 4 留档 |
+| S3 内部细分设计 | entry_stopped / stopped / running 建模；弹药：OQ-2 守卫按命令分集合（stackTrace 收 entry_stopped，scopes/continue 只收 stopped，threads 无守卫）/ stopOnEntry 参数（OQ-4=参数非竞态） | design-notes shutdown 档案 TODO |
+| 混沌任务 B 细对账 | 五分类已定型语义；无冒号头行对齐参考与否（拒 vs 忽略）未裁 | design-notes framing 档案注记 |
+| capability 再验 | 可选/核心分层（代念收尾）——深读撞到再验 | design-notes shutdown 档案 |
+| framing 复述验灵 | 结构入口式提问首秀（三条协议修正的检验） | 账本"复述方法论修正"行 |
+| ~~六偏离转期~~ | **已清**：#6 融化（假偏离，工具 bug 孵化），#1–#5 源码全证 | design-notes 决策清单 |
+
+已结清单（勿重做）：六偏离对账、OQ-1/3/4、phase 默认值裁决、ok_reply 退役、任务 B 语义定型（五分类）、阶段 3/4 复述结算。
 
 ## 环境（✅ 2026-10-13 已确认就绪，机械件）
 
