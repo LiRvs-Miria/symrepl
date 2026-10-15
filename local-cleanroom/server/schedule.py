@@ -10,9 +10,10 @@ import functools
 import signal
 import sys
 from dataclasses import dataclass, field
+from typing import assert_never
 
 from error import TransExitCode
-from framing import FrameError, encode_frame, read_frame
+from framing import FrameBad, FrameBadReason, FrameEof, FrameOk, FrameOut, encode_frame, read_frame
 from statemachine import MaybeParsedRequest, Reply, ProtoState, StateEnum, build_replies, parse_request, step
 
 
@@ -51,41 +52,39 @@ async def handle(reader: asyncio.StreamReader,
     log(f"connected peer={peer}")
     try:
         while True:
-            
-            #try:
-            #    msg = await read_frame(reader)
-            #except FrameError as e:
-            #    # 坏帧→ABRUPT：对齐参考"malformed client frame"exit=2 实证；正式决策留阶段3
-            #    conn.exit_code = TransExitCode.ABRUPT
-            #    log(f"session_end reason=bad_frame peer={peer} err={e}")
-            #    break
-            ##end try
-            #if msg is None:
-            #    # FIN：对端体面告别，不是异常
-            #    log(f"session_end reason=eof peer={peer}")
-            #    break
-            ##end if
-            #if msg.get("type") != "request":
-            #    log(f"ignored non-request frame type={msg.get('type')!r}")
-            #    continue
-            ##end if
+            frame_out: FrameOut = await read_frame(reader)
+            match frame_out:
+                case FrameOk(payload=msg):
+                    parsed: MaybeParsedRequest = parse_request(msg)  # 边界解析：正常→step，异常→直接回包
+                    if isinstance(parsed, Reply):
+                        # 未知命令：parse 阶段直接产出应答，不进状态机
+                        frames, new_pstate = (parsed,), conn.pstate
+                    else:
+                        result = step(conn.pstate, parsed)
+                        frames, new_pstate = result.frames, result.state
+                    #end if
+                    out_frames, conn.seq = build_replies(frames, conn.seq)
+                    conn.pstate = new_pstate          # 协议状态由返回值搬运（纯核，无原地突变）
+                    for out in out_frames:
+                        writer.write(encode_frame(out))
+                        await writer.drain()
+                    #end for
+                    if conn.pstate.phase == StateEnum.DEAD:
+                        break                         # disconnect 应答已送达，会话完毕
+                case FrameBad(reason=reason, detail=detail):
+                    # 坏帧→ABRUPT：no-resync（对齐参考 decision 2），reason 名=探针分类锚点
+                    conn.exit_code = TransExitCode.ABRUPT
+                    log(f"session_end reason=bad_frame peer={peer} "
+                        f"frame_bad={reason.name} detail={detail}")
+                    break
+                case FrameEof():
+                    # FIN：对端体面告别，不是异常
+                    log(f"session_end reason=eof peer={peer}")
+                    break
+                case _:
+                    assert_never(frame_out)   # 穷尽性：ADT 加员忘接=构造期大声失败
+            #end match
 
-            parsed: MaybeParsedRequest = parse_request(msg)  # 边界解析：正常→step，异常→直接回包
-            if isinstance(parsed, Reply):
-                # 未知命令：parse 阶段直接产出应答，不进状态机
-                frames, new_pstate = (parsed,), conn.pstate
-            else:
-                result = step(conn.pstate, parsed)
-                frames, new_pstate = result.frames, result.state
-            #end if
-            out_frames, conn.seq = build_replies(frames, conn.seq)
-            conn.pstate = new_pstate          # 协议状态由返回值搬运（纯核，无原地突变）
-            for out in out_frames:
-                writer.write(encode_frame(out))
-                await writer.drain()
-            #end for
-            if conn.pstate.phase == StateEnum.DEAD:
-                break                         # disconnect 应答已送达，会话完毕
         #end while
     # RST：连接被对端/内核枪毙（ECONNRESET，常现于 read/drain）
     except ConnectionResetError as e:
