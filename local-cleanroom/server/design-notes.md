@@ -64,7 +64,7 @@ def on_teardown():                     # 清理题答案
 - 有意偏离：参考实现嘴碎直说原因（"requires a 'ktest' path string"）；
   本设计粗类+detail 分层。理由=统一分层结构（威胁模型：环回单客户端自己人）
 
-## 已记录的对参考实现偏离（决策清单）
+## 已记录的对参考实现偏离（决策清单，挂账简称「六偏离」）
 
 1. 状态门：本设计 S0/S1/S2 拒非法事件回状态错；参考状态盲（§4-1 launch 在 S0 进参数校验）
 2. initialize 重入：拒；参考允许（§4-2 第二次 success 同 body）。理由=状态机纯洁
@@ -114,8 +114,9 @@ build_replies(expect, seq_counter) -> frames   # 专职回包（含放行双帧�
 - seq 所有权归 build_replies：四 handler 均不读 seq 做决策，线格式关注点不入协议语义（用户判定）
 - **结果 ADT（ExpectState 内的 outcome）待用户设计**——验收单：须能表达 7 种结果
   （caps 应答 / 状态错 / 参数错 / 双发错 / **launch=0 帧入 slot** / **configDone=放行双帧** / disconnect 应答）
+  → **v4 已结案（2026-10-15，见文末「核的契约 v4」）**——转录曾跳过本设计环节，design review 逮回
 - slot 不可变延伸：`PendingLaunch(NamedTuple)`，dict 直接入 slot 会别名漏水（浅拷贝反例已演示）
-- ProtoError.code 默认 OK：用户暂用默认搭框架；保守意见=去默认逼显式（静默成功是地雷），未裁决
+- ProtoError.code 默认值：**已裁决（2026-10-15 用户裁：去默认逼显式**，理由=静默成功是地雷，构造期报错优于 review 眼力）。考古注：代码存档自 745ed7d 起 code 即无默认（"暂用默认"仅存在于会话现场，从未落码），本行此前为陈旧尾注；裁决当日 12 探针复跑全过
 
 **不变量**：
 
@@ -131,3 +132,41 @@ build_replies(expect, seq_counter) -> frames   # 专职回包（含放行双帧�
 - `on_launch` 现在返回 None 表示"无输出但状态变了"——纯版元组里空列表显式表达，None 惯例消失
 - `on_configurationDone` 返回两帧——元组第二元素是列表，别拆散
 - 壳的 `if state.phase == Phase.DEAD: break`——改用 step 返回值判断，且断路器仍然"回完应答再退"
+
+## 核的契约 v4（2026-10-15，帧类型代数——用户裁定，阶段 1 后 design review 产出）
+
+**review 发现**：上节验收单的"结果 ADT 待用户设计"环节被转录跳过——ExpectState 交了
+`tuple[Reply, ...]`，语义靠帧数编码（0=扣/1=应答/2=放行），七种结果塌缩成三种帧数。
+探针全过：**回归网测行为等价，测不出类型表达力缺位**。
+
+**用户裁定**：帧类型代数——**语义由构造点声明，消费端禁止按帧数/位置反推**。
+
+```python
+class Event(NamedTuple):
+    event: str               # DAP 事件名（stopped/output/exited…）
+    body: dict | None = None
+
+Frame = Reply | Event        # Reply=Response 语义载体，不改名
+# StepResult.state + frames: tuple[Frame, ...]
+```
+
+**命名**：ExpectState → **StepResult**（2026-10-15 用户裁，名实对齐——装的是转移结果不是状态；纯机械改名零行为，12 探针复跑全过。本文 v2 节及 review 记录中的旧名保留，属历史记录）。
+
+**追加裁决 v4.1（同日）：Reply 劈分 OkReply/ErrReply**——失败必携 ProtoError 从 build_replies
+运行时 `raise ValueError` 升级为**构造期不可能**（非法状态不可表示；与 ProtoError.code 去默认同哲学）。
+`Reply = OkReply | ErrReply`（success 布尔退役）；build_replies match 穷尽扩为三 variant + assert_never；
+线格式零变化，12 探针全过。
+
+**同日否决案（记录带理由）**：frames 类型上界 `tuple[()] | tuple[Frame] | tuple[Frame, Frame]`——
+①界是当前转移表的观察非协议事实，阶段 2/3 事件一来必破；②union 只拦"≥3 帧"，而 step 是封闭
+构造点、该错误类不存在，真手滑（放行忘发第二帧）因 Single 全局合法拦不住——归 R8 行为网守；
+③语义命名变体（Silent/Released）=帧数编码回潮。裁决：不封顶，劈 Reply。
+
+**三项子裁决**（用户定稿）：①Event 现在就声明+定序列化（今日无生产者，dead until 阶段 2/3，探针覆盖不到如实入档）；②不加 outcome 标签（typed frames+slot 已承载全部语义，双写=冗余）；③命名 `Frame = Reply | Event`（Reply 不改名）。
+
+**序列化规则**：Response→线上形状不变；Event→`{"seq", "type": "event", "event", "body"?}`，事件同样吃 seq 账本（账本唯一归 build_replies，不变）。
+
+**验收单 7 种结果对号 v4**：扣的静默改由 slot 承载（"slot 即 S2"的推论），帧数退役——
+caps=`(Response(ok,CAPS),)`；状态错/参数错/双发错=`(Response(err 码+detail),)` 靠码区分不靠帧数；扣=`()` 且 slot 入账；放行=构造点排好的双帧（launch 先，偏离#6/R8 不动）；disconnect=`(Response(ok),)`。
+
+**预埋攻击点（转录自查）**：build_replies 的 match 必须**穷尽** Frame 两 variant——`assert_never`，将来加 variant 忘加 case=构造期大声失败（match_command 同哲学）。落地记录：12 探针全过；LSP 另逮到壳发送循环误迭代语义层（本轮改名引出，当场修）。

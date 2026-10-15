@@ -72,14 +72,14 @@ async def handle(reader: asyncio.StreamReader,
             parsed: MaybeParsedRequest = parse_request(msg)  # 边界解析：正常→step，异常→直接回包
             if isinstance(parsed, Reply):
                 # 未知命令：parse 阶段直接产出应答，不进状态机
-                replies, new_pstate = (parsed,), conn.pstate
+                frames, new_pstate = (parsed,), conn.pstate
             else:
-                expect = step(conn.pstate, parsed)
-                replies, new_pstate = expect.replies, expect.state
+                result = step(conn.pstate, parsed)
+                frames, new_pstate = result.frames, result.state
             #end if
-            frames, conn.seq = build_replies(replies, conn.seq)
+            out_frames, conn.seq = build_replies(frames, conn.seq)
             conn.pstate = new_pstate          # 协议状态由返回值搬运（纯核，无原地突变）
-            for out in frames:
+            for out in out_frames:
                 writer.write(encode_frame(out))
                 await writer.drain()
             #end for

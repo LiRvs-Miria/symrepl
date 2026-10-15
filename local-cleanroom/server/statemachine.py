@@ -1,13 +1,15 @@
-"""statemachine — 会话协议状态机（核心，纯函数版，契约 v3）。
+"""statemachine — 会话协议状态机（核心，纯函数版，契约 v4.1）。
 
 pipeline：parse_request（边界解析，dict→类型）→ step（模式匹配状态转移）
 → build_replies（回包+seq 账本）。核内零 I/O、零原地突变、零裸字符串。
 
 状态与转移全部来自 design-notes.md 定稿：事件=转移条件，状态=能待着的东西。
-slot 即状态：PendingLaunch 非空 = S2。结果 ADT 验收单=七种结果（契约 v2）。
+slot 即状态：PendingLaunch 非空 = S2。结果代数=Frame=Reply|Event（契约 v4/v4.1）：
+语义由构造点声明，帧数不携带语义；非法状态不可表示（失败必携 ProtoError 是
+构造期事实，非运行时检查）；七种结果对号表见 design-notes。
 """
 from enum import Enum, IntEnum
-from typing import NamedTuple
+from typing import NamedTuple, assert_never
 from error import InternalErrCode, ProtoError
 
 
@@ -64,20 +66,37 @@ class ProtoState(NamedTuple):
 #end class
 
 
-class Reply(NamedTuple):
-    """一帧应答的语义描述（线上形状由 build_replies 决定）。"""
+class OkReply(NamedTuple):
+    """应答（成功）：payload=None=线上无 body。"""
     request: ParsedRequest
-    success: bool
     payload: dict | None = None
-    error: ProtoError | None = None
 #end class
+
+
+class ErrReply(NamedTuple):
+    """应答（失败）：error 必携——构造期强制，非法状态不可表示（契约 v4.1）。"""
+    request: ParsedRequest
+    error: ProtoError
+#end class
+
+
+Reply = OkReply | ErrReply   # 一帧应答的代数（契约 v4.1）：success 布尔退役，劈为两变体
 
 
 MaybeParsedRequest = ParsedRequest | Reply   # parse 的输出代数：正常→step，异常→直接回包
 
-class ExpectState(NamedTuple):
+
+class Event(NamedTuple):
+    event: str               # DAP 事件名（stopped/output/exited…）
+    body: dict | None = None
+#end class
+
+
+Frame = Reply | Event        # 线上帧的代数（契约 v4）：语义由构造点声明；Event 今日无生产者（dead until 阶段 2/3）
+
+class StepResult(NamedTuple):
     state: ProtoState
-    replies: tuple[Reply, ...] = ()   # 0 帧=扣/无话，1 帧=应答，2 帧=放行
+    frames: tuple[Frame, ...] = ()   # 帧数不携带语义：扣的静默归 slot 承载（slot 即 S2），放行=构造点排好的双帧
 #end class
 
 
@@ -95,6 +114,7 @@ def parse_request(msg: dict) -> MaybeParsedRequest:
                          "not implemented", f"unknown command {cmd!r}")
     #end if
     args = msg.get("arguments")
+    assert isinstance(cmd, str)   # command 非 None 蕴含 cmd 是 str（match_command 只认 str）；窄化给检查器
     return ParsedRequest(seq=msg.get("seq"), command=command, raw_command=cmd,
                          arguments=args if isinstance(args, dict) else {})
 #end def
@@ -102,14 +122,14 @@ def parse_request(msg: dict) -> MaybeParsedRequest:
 
 # ---------- 应答构造助手 ----------
 
-def ok_reply(request: ParsedRequest, payload: dict | None = None) -> Reply:
-    return Reply(request=request, success=True, payload=payload)
+def ok_reply(request: ParsedRequest, payload: dict | None = None) -> OkReply:
+    return OkReply(request=request, payload=payload)
 #end def
 
-def err_reply(request: ParsedRequest, code: InternalErrCode, message: str, detail: str) -> Reply:
+def err_reply(request: ParsedRequest, code: InternalErrCode, message: str, detail: str) -> ErrReply:
     # A1 分层：粗类码 + 现象在 message，原因在 detail
-    return Reply(request=request, success=False,
-                 error=ProtoError(code=code, message=message, detail={"detail": detail}))
+    return ErrReply(request=request,
+                    error=ProtoError(code=code, message=message, detail={"detail": detail}))
 #end def
 
 
@@ -126,51 +146,51 @@ def validate_launch(args: dict):
 
 # ---------- step：模式匹配分发（转移表逐行转录） ----------
 
-def step(pstate: ProtoState, req: ParsedRequest) -> ExpectState:
+def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
     phase = pstate.phase
     match phase, req.command:
         case (StateEnum.S0, Command.INITIALIZE):
-            return ExpectState(pstate._replace(phase=StateEnum.S1),
+            return StepResult(pstate._replace(phase=StateEnum.S1),
                                (ok_reply(req, CAPABILITIES),))
 
         case (StateEnum.S1, Command.LAUNCH):
             e = validate_launch(req.arguments)
             if e is not None:
-                return ExpectState(pstate,
+                return StepResult(pstate,
                                    (err_reply(req, InternalErrCode.BAD_PROTOCOL,
                                               "bad launch parameters", e),))
             #end if
             # 放：请求入 slot，扣响应（线上静默——设计灵魂）
-            return ExpectState(pstate._replace(phase=StateEnum.S2,
+            return StepResult(pstate._replace(phase=StateEnum.S2,
                                                slot=PendingLaunch(request=req)), ())
 
         case (StateEnum.S2, Command.CONFIGURATION_DONE):
             pending = pstate.slot
             if pending is None:   # 不变量说 S2 蕴含非空；防御一把
-                return ExpectState(pstate,
+                return StepResult(pstate,
                                    (err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
                                               "event not allowed in current state",
                                               "no launch in flight"),))
             #end if
             # 放行：launch 应答从 stash 的 request 现场构造（契约 v2），launch 先发（偏离#6）
-            return ExpectState(pstate._replace(phase=StateEnum.S3, slot=None),
+            return StepResult(pstate._replace(phase=StateEnum.S3, slot=None),
                                (ok_reply(pending.request, {}), ok_reply(req, {})))
 
         case (_, Command.DISCONNECT):
             # 断路器：任何状态无守卫直达终态（偏离#5）；清 slot=丢弃整个状态
-            return ExpectState(pstate._replace(phase=StateEnum.DEAD, slot=None),
+            return StepResult(pstate._replace(phase=StateEnum.DEAD, slot=None),
                                (ok_reply(req, {}),))
 
         case (StateEnum.S2, Command.LAUNCH):
             # 双发：专属 detail（转移表 S2 行，R7 教训——泛化分支会吞掉它）
-            return ExpectState(pstate,
+            return StepResult(pstate,
                                (err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
                                           "event not allowed in current state",
                                           "launch_already_pending"),))
 
         case _:
             # 状态门 + 占位态：该事件在当前状态不允许（偏离#1 状态门、#2 重入拒）
-            return ExpectState(pstate,
+            return StepResult(pstate,
                                (err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
                                           "event not allowed in current state",
                                           f"{req.raw_command} not allowed in {phase.name}"),))
@@ -180,26 +200,33 @@ def step(pstate: ProtoState, req: ParsedRequest) -> ExpectState:
 
 # ---------- build_replies：回包段（seq 账本在此） ----------
 
-def build_replies(replies: tuple[Reply, ...], seq: int):
-    # 线上形状在此定型：错误帧 body={code, detail}，成功帧 body=payload
-    frames = []
-    for r in replies:
-        m = {"seq": seq, "type": "response", "request_seq": r.request.seq,
-             "command": r.request.raw_command, "success": r.success}
+def build_replies(frames: tuple[Frame, ...], seq: int):
+    # 线上形状在此定型：Response→应答帧；Event→事件帧（同样吃 seq 账本，账本唯一归本函数）
+    out = []
+    for f in frames:
+        match f:
+            case OkReply():
+                m = {"seq": seq, "type": "response", "request_seq": f.request.seq,
+                     "command": f.request.raw_command, "success": True}
+                if f.payload is not None:
+                    m["body"] = f.payload
+                #end if
+            case ErrReply():
+                e = f.error   # 失败必携 ProtoError=类型事实，运行时检查已死（契约 v4.1）
+                m = {"seq": seq, "type": "response", "request_seq": f.request.seq,
+                     "command": f.request.raw_command, "success": False,
+                     "message": e.message,
+                     "body": {"code": int(e.code), "detail": (e.detail or {}).get("detail")}}
+            case Event():
+                m = {"seq": seq, "type": "event", "event": f.event}
+                if f.body is not None:
+                    m["body"] = f.body
+                #end if
+            case _:
+                assert_never(f)   # 穷尽性：新 variant 忘加 case=构造期大声失败（match_command 同哲学）
+        #end match
         seq += 1
-        if r.success:
-            if r.payload is not None:
-                m["body"] = r.payload
-            #end if
-        else:
-            e = r.error
-            if e is None:   # 不变量：失败应答必携 ProtoError
-                raise ValueError("failed reply missing ProtoError")
-            #end if
-            m["message"] = e.message
-            m["body"] = {"code": int(e.code), "detail": (e.detail or {}).get("detail")}
-        #end if
-        frames.append(m)
+        out.append(m)
     #end for
-    return frames, seq
+    return out, seq
 #end def
