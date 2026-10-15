@@ -80,6 +80,12 @@ def on_teardown():                     # 清理题答案
 - **OQ-3 configDone=spawn**：process 事件紧随 configurationDone——slot 内容更像"待 spawn 的 launch 参数"而非"待发的响应"；与 v5-C slot 语义提示的偏差待源码定夺
 - **OQ-4 entry-stopped 竞态**：有跑停住（stopped 事件），有直接跑死到 'dead'，机理未查
 
+- **对案（2026-10-15，黑盒+源码双证，详见账本 2026-10-15 行）**：
+  - **OQ-1 结案**——放行=configDone 本身（server.py:448-473 取 `_pending_launch` 立即回两帧，launch 先），不等任何 stop 相位。10-14 四跑不见响应=**客户端驱动丢弃 recv 残余缓冲**吃掉粘段帧（原版客户端复现）——**偏离#6 融化**：参考行为与本章 R8 行（configDone 放两帧、launch 先）一致
+  - **OQ-3 修正**——slot 存请求 seq 非 launch 参数（:102,:400）；inferior spawn 在 launch 处理内完成（child_request 返回 pid），process 事件 launch 时已发出，"configDone 触发 spawn"是客户端晚读错觉
+  - **OQ-4 破案**——非竞态=**stopOnEntry 参数**（:427-428，默认 False；demo 传了 true）
+  - **OQ-2 增补**——相位守卫按命令分集合（stackTrace 收 `('stopped','entry_stopped')`，scopes/continue 只收 `('stopped',)`，threads 无守卫）；trace 报告走 trace_report→output 事件于 exit 后推（:803-810）；参考真命令名=`replay.branchTrace`（:121，decision 5 前缀）
+
 ## 黑盒锚点（2026-10-14 帧序实验副产品）
 
 - launch 必需参数：`ktest` + `target` 两个路径字符串（错误文案逐步引导）
@@ -170,3 +176,42 @@ Frame = Reply | Event        # Reply=Response 语义载体，不改名
 caps=`(Response(ok,CAPS),)`；状态错/参数错/双发错=`(Response(err 码+detail),)` 靠码区分不靠帧数；扣=`()` 且 slot 入账；放行=构造点排好的双帧（launch 先，偏离#6/R8 不动）；disconnect=`(Response(ok),)`。
 
 **预埋攻击点（转录自查）**：build_replies 的 match 必须**穷尽** Frame 两 variant——`assert_never`，将来加 variant 忘加 case=构造期大声失败（match_command 同哲学）。落地记录：12 探针全过；LSP 另逮到壳发送循环误迭代语义层（本轮改名引出，当场修）。
+
+## shutdown 设计档案（2026-10-15 用户定稿；**阶段 3 改道：只做 clean-room，真代码库 shutdown 押后**）
+
+**语义决策（用户五答+三钉，全部用户产出，本文为转录）**：
+
+1. 回包：success、**无 body**（seq/request_seq/原始命令标准形）
+2. 收场：响应发出后**补一发 terminated 事件**，随即会话结束（server 自退场，不等客户端告别）
+3. 退出码：**0=FIN**（两层退出码代数的 FIN 粗类，非 RST）
+4. 状态策略：**断路器统一放行**——任意状态（S0/S1/S2/S3）无守卫，同 disconnect 哲学（逃生门内侧不上锁）
+5. S3 内部细分（正常运行/命中或没命中断点）后置设计，不在本 cycle（design TODO 挂账）
+6. capability 红线（半对，追问挂复述）：`supportsTerminateRequest` 为何要广告而 shutdown 不用？方向=capability 只广告**可选**能力
+
+**转移表增补行**：
+
+| 当前状态 | 事件 | 守卫 | 动作 | 新状态 |
+|---|---|---|---|---|
+| 全部（S0-S3） | shutdown | 无（断路器） | 回 ok 响应（无 body）→ 发 terminated 事件（**帧序=响应先**，序不变量"响应先于其引发的事件"） | 终态（DEAD） |
+
+**转录落点（实现=用户；壳零改动——DEAD 判终态 schedule.py:86-87、收场丢状态+exit0 :97-105/:139 全是既有路）**：
+
+1. `Command.SHUTDOWN = "shutdown"`（enum 增员）
+2. match_command 宣言清单 += `case "shutdown"`（显式处理承诺）
+3. step += `case (_, Command.SHUTDOWN)` → `ExpectState(pstate._replace(phase=DEAD, slot=None), (ok_reply(req), Event("terminated", {})))`
+
+**S2 特例断言**：slot 非空时 shutdown——扣着的 launch 响应**作废丢弃**（不变量 5：收场=丢弃整个状态），客户端只应收到 [shutdown resp, terminated]，绝无 launch 帧泄漏。
+
+**Frame 代数兑现**：terminated 是 Event variant 的**第一个生产者**——response+event 同转移混排一处输出，v3 的 `tuple[Reply, ...]` 无法表达，v4 留位当日兑现。
+
+**验收网（三件套）**：
+- 契约先行=本节；回归网=12 探针原样全过（R4 的 `shudown` 拼写探针必须保持 unknown）+ `probe_shutdown.py`（AI 转录：S0/S1/S2/S3 四状态矩阵+帧序+slot 不泄漏+自退场 exit0）；复述照走（挂账见下）
+- 客户端需求文本：dap_client.py 新增 shutdown 断言函数（AI 转录）
+
+**复述挂账（shutdown 链）**：断路器哲学为何覆盖 shutdown / 帧序为什么响应先 / S2 slot 作废的依据 / capability 追问
+
+**落地记录（2026-10-15 当日）**：用户实现三小件+首验两偏（terminated 缺席、`ok_reply(req,{})` 使 body:{} 上线）→ 同日裁决 **ok_reply 助手退役**（直构 `OkReply(request=req)`，payload 缺省在调用点可见化；err_reply 留任=A1 约定集中点，`{"detail": detail}` 包法不散抄）→ 机械清扫 5 调用点 → **probe_shutdown 8 项+转移表 12 探针全绿**。Event variant 首个生产者上线，v4 留位兑现。
+
+**构造约定（2026-10-15 用户裁定）**：ADT 构造一律**具名成员**——`StepResult(state=…, frames=…)`、`Event(event=…, body=…)`、`OkReply(request=…)`，位置式禁用（可读性：`frames=(OkReply(request=req), Event(event="terminated"))` 自释帧序与种类）。
+
+**收场事件对齐（2026-10-15 裁决 a）**：disconnect 与 shutdown **两门形状统一**——resp 之后都发 terminated 再收场。缘起：clean-room 的 disconnect 原本光杆（R9 只验 resp，从不验事件），而参考的 disconnect 后 terminated 是 child 杀 inferior 的副产品（server.py:790 翻译），clean-room 无 child 故无此帧——shutdown 人工补了、disconnect 没有，两门分叉无原则。裁决=都补：①对齐参考实测（capture 两回记录 resp→terminated）；②客户端收场序列与走哪扇门无关。R9/R10 探针已补 terminated 断言（网洞：事件有无从未被断言过——网只查你想到要查的，第三次显灵）。
