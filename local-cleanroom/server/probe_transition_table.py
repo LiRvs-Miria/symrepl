@@ -85,16 +85,20 @@ check("R8 放行两帧且 launch 响应先", r1["command"] == "launch" and r2["c
       and r1["success"] and r2["success"])
 dc.send(s, seq, "disconnect", {"terminateDebuggee": True})
 r3, buf = dc.recv(s, buf)
+e, buf = dc.recv(s, buf)
 s.shutdown(socket.SHUT_RDWR); s.close(); time.sleep(0.4)
 check("R9 disconnect 成功响应", r3["success"] and r3["body"] == {})
+check("R9e 收场事件 terminated 随响应", e.get("type") == "event" and e.get("event") == "terminated")
 check("R9b 会话结束进程 exit=0", p.poll() == 0)
 
-# R10: S0 直接 disconnect（断路器）-> 成功 + exit 0
+# R10: S0 直接 disconnect（断路器）-> 成功 + terminated + exit 0
 p = start(); s, buf, seq = session()
 dc.send(s, seq, "disconnect", {"terminateDebuggee": True})
 r, buf = dc.recv(s, buf)
+e, buf = dc.recv(s, buf)
 s.shutdown(socket.SHUT_RDWR); s.close(); time.sleep(0.4)
 check("R10 断路器：S0 disconnect 无守卫成功", r["success"] and r["body"] == {})
+check("R10e 收场事件 terminated 随响应", e.get("type") == "event" and e.get("event") == "terminated")
 check("R10b exit=0", p.poll() == 0)
 
 print("=" * 30)

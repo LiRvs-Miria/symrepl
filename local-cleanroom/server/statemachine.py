@@ -28,6 +28,7 @@ class Command(Enum):
     LAUNCH = "launch"
     CONFIGURATION_DONE = "configurationDone"
     DISCONNECT = "disconnect"
+    SHUTDOWN = "shutdown"
 #end class
 
 def match_command(cmd: str) -> "Command | None":
@@ -38,6 +39,7 @@ def match_command(cmd: str) -> "Command | None":
         case "launch":            return Command.LAUNCH
         case "configurationDone": return Command.CONFIGURATION_DONE
         case "disconnect":        return Command.DISCONNECT
+        case "shutdown":          return Command.SHUTDOWN
         case _:                   return None
     #end match
 #end def
@@ -122,10 +124,6 @@ def parse_request(msg: dict) -> MaybeParsedRequest:
 
 # ---------- 应答构造助手 ----------
 
-def ok_reply(request: ParsedRequest, payload: dict | None = None) -> OkReply:
-    return OkReply(request=request, payload=payload)
-#end def
-
 def err_reply(request: ParsedRequest, code: InternalErrCode, message: str, detail: str) -> ErrReply:
     # A1 分层：粗类码 + 现象在 message，原因在 detail
     return ErrReply(request=request,
@@ -150,50 +148,62 @@ def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
     phase = pstate.phase
     match phase, req.command:
         case (StateEnum.S0, Command.INITIALIZE):
-            return StepResult(pstate._replace(phase=StateEnum.S1),
-                               (ok_reply(req, CAPABILITIES),))
+            return StepResult(state=pstate._replace(phase=StateEnum.S1),
+                              frames=(OkReply(request=req, payload=CAPABILITIES),))
 
         case (StateEnum.S1, Command.LAUNCH):
             e = validate_launch(req.arguments)
             if e is not None:
-                return StepResult(pstate,
-                                   (err_reply(req, InternalErrCode.BAD_PROTOCOL,
-                                              "bad launch parameters", e),))
+                return StepResult(state=pstate,
+                                  frames=(err_reply(req, InternalErrCode.BAD_PROTOCOL,
+                                                    "bad launch parameters", e),))
             #end if
             # 放：请求入 slot，扣响应（线上静默——设计灵魂）
-            return StepResult(pstate._replace(phase=StateEnum.S2,
-                                               slot=PendingLaunch(request=req)), ())
+            return StepResult(state=pstate._replace(phase=StateEnum.S2,
+                                                    slot=PendingLaunch(request=req)),
+                              frames=())
 
         case (StateEnum.S2, Command.CONFIGURATION_DONE):
             pending = pstate.slot
             if pending is None:   # 不变量说 S2 蕴含非空；防御一把
-                return StepResult(pstate,
-                                   (err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
-                                              "event not allowed in current state",
-                                              "no launch in flight"),))
+                return StepResult(state=pstate,
+                                  frames=(err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
+                                                    "event not allowed in current state",
+                                                    "no launch in flight"),))
             #end if
             # 放行：launch 应答从 stash 的 request 现场构造（契约 v2），launch 先发（偏离#6）
-            return StepResult(pstate._replace(phase=StateEnum.S3, slot=None),
-                               (ok_reply(pending.request, {}), ok_reply(req, {})))
+            return StepResult(state=pstate._replace(phase=StateEnum.S3, slot=None),
+                              frames=(OkReply(request=pending.request, payload={}),
+                                      OkReply(request=req, payload={})))
 
         case (_, Command.DISCONNECT):
-            # 断路器：任何状态无守卫直达终态（偏离#5）；清 slot=丢弃整个状态
-            return StepResult(pstate._replace(phase=StateEnum.DEAD, slot=None),
-                               (ok_reply(req, {}),))
+            # 断路器：任何状态无守卫直达终态（偏离#5）；清 slot=丢弃整个状态；
+            # 帧序=响应先、terminated 后（2026-10-15 裁决 a：两门形状统一，对齐参考实测）
+            return StepResult(state=pstate._replace(phase=StateEnum.DEAD, slot=None),
+                              frames=(OkReply(request=req, payload={}),
+                                      Event(event="terminated", body={})))
+
+        case (_, Command.SHUTDOWN):
+            # 断路器：任何状态无守卫直达终态；清 slot=丢弃整个状态；
+            # 帧序=响应先、terminated 事件后（序不变量）；OkReply 缺省 payload=None=无 body
+            # （勿抄 disconnect 行的 payload={}——那是 disconnect 的形状，shutdown 裁决=无 body）
+            return StepResult(state=pstate._replace(phase=StateEnum.DEAD, slot=None),
+                              frames=(OkReply(request=req),
+                                      Event(event="terminated", body={})))
 
         case (StateEnum.S2, Command.LAUNCH):
             # 双发：专属 detail（转移表 S2 行，R7 教训——泛化分支会吞掉它）
-            return StepResult(pstate,
-                               (err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
-                                          "event not allowed in current state",
-                                          "launch_already_pending"),))
+            return StepResult(state=pstate,
+                              frames=(err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
+                                                "event not allowed in current state",
+                                                "launch_already_pending"),))
 
         case _:
             # 状态门 + 占位态：该事件在当前状态不允许（偏离#1 状态门、#2 重入拒）
-            return StepResult(pstate,
-                               (err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
-                                          "event not allowed in current state",
-                                          f"{req.raw_command} not allowed in {phase.name}"),))
+            return StepResult(state=pstate,
+                              frames=(err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
+                                                "event not allowed in current state",
+                                                f"{req.raw_command} not allowed in {phase.name}"),))
     #end match
 #end def
 

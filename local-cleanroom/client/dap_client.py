@@ -21,13 +21,21 @@ def send(sock, seq, command, arguments=None):
 def recv(sock, buf):
     # 1) 先把帧头读全
     while b"\r\n\r\n" not in buf:
-        buf += sock.recv(4096)
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise EOFError("peer closed mid-header")   # EOF 必须大声：原版在这里 b"" 死旋
+        buf += chunk
+    #end if
     head, _, buf = buf.partition(b"\r\n\r\n")
     length = int(dict(l.split(b":", 1) for l in head.split(b"\r\n")
                       if b":" in l)[b"Content-Length"])
-    # 2) 再把 body 读够（可能已经有一部分在 buf 里了）
+    # 2) 再把 body 读够（可能已经有一部分在 buf 里）
     while len(buf) < length:
-        buf += sock.recv(length - len(buf))
+        chunk = sock.recv(length - len(buf))
+        if not chunk:
+            raise EOFError("peer closed mid-body")
+        buf += chunk
+    #end if
     body, buf = buf[:length], buf[length:]
     return json.loads(body.decode("utf-8")), buf
 
@@ -92,44 +100,116 @@ def testDisconnAfterShutdown():
     print("end test socket disconnect after init...")
 #end def
 
-def testLaunchConfigOrder(port=5679):
-    # 帧序先验（2026-10-14）：configDone 响应先、launch 响应后——待参考 server 实测裁决
+def drain(sock, buf, tag, window=3):
+    """排空：**接力 buf** 逐帧打印，直到超时/断链。残余缓冲必须接回来——
+    同段 TCP 的粘帧就住在里面，丢了=吃帧（2026-10-14 四跑假象的根因）。"""
+    sock.settimeout(window)
+    n = 0
+    try:
+        while True:
+            m, buf = recv(sock, buf)
+            show(m); n += 1
+    except socket.timeout:
+        print("<- (%s 完毕，共 %d 帧)" % (tag, n))
+    except (ConnectionResetError, EOFError) as e:
+        print("<- (%s 连接断（%s），共 %d 帧)" % (tag, type(e).__name__, n))
+    #end try
+    return buf
+#end def
+
+def testLaunchConfigOrder():
+    # 帧序裁决（OQ-1 已结案 2026-10-15）：放行=configDone 本身，launch resp 先、configDone resp 后
     ktest = "/home/odot/github/symrepl/third_party/klee/ktest/get_sign_test000003.ktest"
     target = "/tmp/opencode/replay-build/get_sign"
-    sock, buf = connect("127.0.0.1", port)
+    sock, buf = connect("127.0.0.1", 5678)
     sock.settimeout(10)   # 放行帧不来就超时报警，别挂死
     seq = count(1)
-    print("start frame-order test (prior: configDone response first)...")
+    print("start frame-order test (fixed: buf 接力)...")
     send(sock, seq, "initialize", {"adapterId": "symrepl"})
     show(recv(sock, buf)[0])
     send(sock, seq, "launch", {"ktest": ktest, "target": target})
-    # 扣响应：故意不 recv——正常情况下此刻线上静默
+    # 扣响应：故意不 recv——注意 process/initialized 事件此刻已在 TCP 缓冲里排队
     send(sock, seq, "configurationDone")
-    sock.settimeout(3)   # 排空窗口
-    n = 0
-    try:   # 排空1：看放行后事件流
-        while True:
-            show(recv(sock, buf)[0]); n += 1
-    except socket.timeout:
-        print("<- (排空1完毕，共 %d 帧)" % n)
-    print(">> send threads (假设：响应放行耦合在下一个请求)")
+    buf = drain(sock, buf, "排空1", 3)    # 期望：process, initialized, launch resp, configDone resp
+    print(">> send threads")
     send(sock, seq, "threads")
-    n = 0
-    try:   # 排空2：threads 应答 + 疑似被扣的两响应
-        while True:
-            show(recv(sock, buf)[0]); n += 1
-    except socket.timeout:
-        print("<- (排空2完毕，共 %d 帧)" % n)
+    buf = drain(sock, buf, "排空2", 3)    # threads 应答（若进程已跑死：exited/terminated 也在此）
     print(">> send disconnect")
     send(sock, seq, "disconnect", {"terminateDebuggee": True})
-    n = 0
-    try:   # 排空3：disconnect 应答 + 若仍扣押的响应
-        while True:
-            show(recv(sock, buf)[0]); n += 1
-    except socket.timeout:
-        print("<- (排空3完毕，共 %d 帧)" % n)
+    buf = drain(sock, buf, "排空3", 3)    # disconnect 应答 + terminated
     disconnect(sock, seq)
     print("end frame-order test...")
+#end def
+
+def shutdown_tail(sock, buf):
+    """shutdown 收尾断言（2026-10-15 需求转录）：第一帧=shutdown 响应（success、无 body），
+    第二帧=terminated 事件。帧序=响应先于其引发的事件。"""
+    resp, buf = recv(sock, buf)
+    assert resp.get("type") == "response" and resp.get("command") == "shutdown" \
+        and resp.get("success") is True and "body" not in resp, \
+        f"shutdown 响应形状不符: {resp}"
+    ev, buf = recv(sock, buf)
+    assert ev.get("type") == "event" and ev.get("event") == "terminated", \
+        f"terminated 缺位或序错: {ev}"
+    show(resp); show(ev)
+    return resp, ev, buf
+#end def
+
+def testShutdownBare(port=5678):
+    """S0 裸连接 shutdown：断路器统一放行，无守卫（2026-10-15 需求）。"""
+    sock, buf = connect("127.0.0.1", port); sock.settimeout(5)
+    seq = count(1)
+    print("start bare shutdown (S0)...")
+    send(sock, seq, "shutdown")
+    shutdown_tail(sock, buf)
+    disconnect(sock, seq)
+    print("end bare shutdown（server 应已自退场 exit=0，不等告别）...")
+#end def
+
+def testShutdownAfterInit(port=5678):
+    """S1 initialize 之后 shutdown（2026-10-15 需求）。"""
+    sock, buf = connect("127.0.0.1", port); sock.settimeout(5)
+    seq = count(1)
+    print("start shutdown after init (S1)...")
+    send(sock, seq, "initialize", {"adapterId": "symrepl"})
+    show(recv(sock, buf)[0])
+    send(sock, seq, "shutdown")          # 第 2 个请求：request_seq 应为 2
+    shutdown_tail(sock, buf)
+    disconnect(sock, seq)
+    print("end shutdown after init...")
+#end def
+
+def testShutdownWithSlot(port=5678):
+    """S2 slot 非空时 shutdown：扣着的 launch 响应作废（不变量 5：收场=丢弃整个状态），
+    线上只有 [shutdown resp, terminated]，绝无 launch 帧泄漏。"""
+    sock, buf = connect("127.0.0.1", port); sock.settimeout(5)
+    seq = count(1)
+    print("start shutdown with slot (S2)...")
+    send(sock, seq, "initialize", {"adapterId": "symrepl"})
+    show(recv(sock, buf)[0])
+    send(sock, seq, "launch", {"ktest": "k", "target": "t"})   # 好参数入 slot，故意不收
+    send(sock, seq, "shutdown")          # 第 3 个请求：request_seq 应为 3
+    resp, ev, buf = shutdown_tail(sock, buf)
+    assert resp.get("request_seq") == 3, f"request_seq 应=3（launch 响应若泄漏会先到）: {resp}"
+    disconnect(sock, seq)
+    print("end shutdown with slot...")
+#end def
+
+def testShutdownAfterRelease(port=5678):
+    """S3 放行后 shutdown：init→launch→configDone（两帧）→shutdown→[resp, terminated]。"""
+    sock, buf = connect("127.0.0.1", port); sock.settimeout(5)
+    seq = count(1)
+    print("start shutdown after release (S3)...")
+    send(sock, seq, "initialize", {"adapterId": "symrepl"})
+    show(recv(sock, buf)[0])
+    send(sock, seq, "launch", {"ktest": "k", "target": "t"})
+    send(sock, seq, "configurationDone")
+    show(recv(sock, buf)[0])             # launch resp（先）
+    show(recv(sock, buf)[0])             # configDone resp（后）
+    send(sock, seq, "shutdown")          # 第 4 个请求：request_seq 应为 4
+    shutdown_tail(sock, buf)
+    disconnect(sock, seq)
+    print("end shutdown after release...")
 #end def
 
 def show(m):
@@ -143,9 +223,13 @@ def show(m):
 #end def
 
 if __name__ == "__main__":
-    # 测试序列
-    #testInitAfterLaunch()
-    #testInitAfterInit()
-    #testShutdownAfterDisconn() 
-    #testDisconnAfterShutdown()
-    testLaunchConfigOrder()
+    # shutdown 验收入口（2026-10-15）：每测一个要重启一次 server（shutdown 后 server 自退场）。
+    # 全矩阵自动跑（自起自杀 server）在 ../server/probe_shutdown.py。
+    # 用法：python3 dap_client.py [port]（默认 5678）
+    import sys
+    _port = int(sys.argv[1]) if len(sys.argv) > 1 else 5678
+    testShutdownBare(_port)
+    #testShutdownAfterInit(_port)
+    #testShutdownWithSlot(_port)
+    #testShutdownAfterRelease(_port)
+    #testLaunchConfigOrder()
