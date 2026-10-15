@@ -243,4 +243,6 @@ FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
 
 **验收**：probe_framing.py（RED 起步）：R-F1 超长声明（客户端不发 body、socket 保持打开——拒绝不得等字节来齐）→LENGTH_OVERSIZE+ABRUPT；R-F2 `+12`→LENGTH_FORMAT+ABRUPT；R-F3 10 万字节无分隔符头→HEADER_LIMIT+ABRUPT（不 crash 不漏连接）；R-F4 半帧→STREAM_TRUNCATED+ABRUPT；R-F5 干净 FIN→exit0；回归门=转移表 14+shutdown 8 原样全过。**实现=用户**（framing.py 重写 read_frame 返回 ADT+enum+闸；schedule.py 调用点接线），转录（本契约+探针）=AI。
 
+**落地记录（2026-10-15 当日）**：AI 转录实现（用户骨架+契约），网炸出**两个转录 bug**：①Enum 成员值全 `=...`（typing 占位习惯）→同值即别名，五成员全是 LENGTH_OVERSIZE 的别名，reason.name 永远打第一个——auto() 才是无值声明；②isdigit 闸没 strip 冒号后空格→**所有正常帧被拒**（server 收合法帧当 FrameBad 关连接，转移表/shutdown 探针 EOF 三连）——替换旧宽容（int() 吞空白）前先弄清它宽容了什么。修复后 30 探针全绿（framing 8+转移表 14+shutdown 8）。两 bug 由两张不同的网各自抓获——单网单点，多网交叉才见全貌。探针迁 `local-cleanroom/probes/`（工装与源码分居）。**复述挂账**：ErrReply 为何进不了 framing（构不成 request_seq+no-resync）/五分类与任务 B 映射/buffer 外包的代价收益（StreamReader 即状态机）
+
 **复述挂账**：ErrReply 为何进不了 framing（构不成 request_seq+no-resync）/五分类与任务 B 映射/buffer 外包的代价收益（StreamReader 即状态机）
