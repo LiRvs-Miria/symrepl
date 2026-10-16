@@ -28,7 +28,6 @@ class Command(Enum):
     LAUNCH = "launch"
     CONFIGURATION_DONE = "configurationDone"
     DISCONNECT = "disconnect"
-    SHUTDOWN = "shutdown"
 #end class
 
 def match_command(cmd: str) -> "Command | None":
@@ -39,7 +38,6 @@ def match_command(cmd: str) -> "Command | None":
         case "launch":            return Command.LAUNCH
         case "configurationDone": return Command.CONFIGURATION_DONE
         case "disconnect":        return Command.DISCONNECT
-        case "shutdown":          return Command.SHUTDOWN
         case _:                   return None
     #end match
 #end def
@@ -181,14 +179,6 @@ def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
             # 帧序=响应先、terminated 后（2026-10-15 裁决 a：两门形状统一，对齐参考实测）
             return StepResult(state=pstate._replace(phase=StateEnum.DEAD, slot=None),
                               frames=(OkReply(request=req, payload={}),
-                                      Event(event="terminated", body={})))
-
-        case (_, Command.SHUTDOWN):
-            # 断路器：任何状态无守卫直达终态；清 slot=丢弃整个状态；
-            # 帧序=响应先、terminated 事件后（序不变量）；OkReply 缺省 payload=None=无 body
-            # （勿抄 disconnect 行的 payload={}——那是 disconnect 的形状，shutdown 裁决=无 body）
-            return StepResult(state=pstate._replace(phase=StateEnum.DEAD, slot=None),
-                              frames=(OkReply(request=req),
                                       Event(event="terminated", body={})))
 
         case (StateEnum.S2, Command.LAUNCH):

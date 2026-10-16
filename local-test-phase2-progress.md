@@ -13,11 +13,11 @@
 | 真代码库 framing 原案 | 独立分支（自 main 切，src/tests 两分支零差异已验）+ 187 pytest 保绿 + ADR 备注 | 阶段 4 留档 |
 | S3 内部细分设计 | entry_stopped / stopped / running 建模；弹药：OQ-2 守卫按命令分集合（stackTrace 收 entry_stopped，scopes/continue 只收 stopped，threads 无守卫）/ stopOnEntry 参数（OQ-4=参数非竞态） | design-notes shutdown 档案 TODO |
 | 混沌任务 B 细对账 | 五分类已定型语义；无冒号头行对齐参考与否（拒 vs 忽略）未裁 | design-notes framing 档案注记 |
-| capability 再验 | 可选/核心分层（代念收尾）——深读撞到再验 | design-notes shutdown 档案 |
+| ~~capability 再验~~ | **已结（2026-10-16）**：代念内容"shutdown 规范必答"被 ADR 考古证伪（标准 DAP 无此命令）；shutdown 整体退役（用户裁决，design-notes「shutdown 退役」） | design-notes shutdown 退役注 |
 | framing 复述验灵 | 结构入口式提问首秀（三条协议修正的检验） | 账本"复述方法论修正"行 |
 | ~~六偏离转期~~ | **已清**：#6 融化（假偏离，工具 bug 孵化），#1–#5 源码全证 | design-notes 决策清单 |
 
-已结清单（勿重做）：六偏离对账、OQ-1/3/4、phase 默认值裁决、ok_reply 退役、任务 B 语义定型（五分类）、阶段 3/4 复述结算。
+已结清单（勿重做）：六偏离对账、OQ-1/3/4、phase 默认值裁决、ok_reply 退役、任务 B 语义定型（五分类）、阶段 3/4 复述结算、**shutdown 退役（2026-10-16，非标准 DAP 命令；probe_shutdown 8 项随之删，回归网=转移表 14+framing）**。
 
 ## 环境（✅ 2026-10-13 已确认就绪，机械件）
 

@@ -216,6 +216,16 @@ caps=`(Response(ok,CAPS),)`；状态错/参数错/双发错=`(Response(err 码+d
 
 **收场事件对齐（2026-10-15 裁决 a）**：disconnect 与 shutdown **两门形状统一**——resp 之后都发 terminated 再收场。缘起：clean-room 的 disconnect 原本光杆（R9 只验 resp，从不验事件），而参考的 disconnect 后 terminated 是 child 杀 inferior 的副产品（server.py:790 翻译），clean-room 无 child 故无此帧——shutdown 人工补了、disconnect 没有，两门分叉无原则。裁决=都补：①对齐参考实测（capture 两回记录 resp→terminated）；②客户端收场序列与走哪扇门无关。R9/R10 探针已补 terminated 断言（网洞：事件有无从未被断言过——网只查你想到要查的，第三次显灵）。
 
+## shutdown 退役（2026-10-16，用户裁决）
+
+**裁决**：shutdown 命令整体退役——非标准 DAP 命令（LSP 习语；用户原话："我又不是做lsp"）。考古实锤：ADR-0003 decision 4 诚实子集本就无 shutdown（参考收到即回 not implemented，黑盒 §4-5 撞的正是它）；标准 DAP 会话终结由 disconnect（会话面）+terminate（debuggee 面）覆盖，adapter 进程死是隐式的。
+
+**capability 再验挂账就此撞结**：复述结算中"shutdown 为规范必答核心请求"有误——规范无此命令，"必答"只对 disconnect 成立。代念收尾项撞实证修正，验灵兑现。
+
+**教学资产无损移交**：Event 首个生产者/响应先于事件帧序/断路器统一/S2 slot 作废——全由 disconnect 门承载（裁决 a 已两门同形，shutdown 的 terminated 生产者身份可由 disconnect 顶替）。
+
+**落地**：statemachine 三处（enum 成员/match_command 行/step 断路器行）；dap_client 七个 shutdown 函数+两个 §4 顺序实验脚本；probe_shutdown.py 整档删除（回归网 30→转移表 14+framing）。退役红利：`shutdown`/`shudown` 两种拼写同流 unknown→not implemented，行为对齐参考。退役后回归：转移表 14+framing 全绿。若将来确需协议侧退场门，重新立项走完整周期。
+
 ## framing 重构设计档案（2026-10-15 用户定稿：值 ADT/外包缓冲/错误分家）
 
 **总纲（用户原话）**：FP=类型驱动的严格性+错误前置，不是为函数式而函数式。重构脊柱=堵三洞。
