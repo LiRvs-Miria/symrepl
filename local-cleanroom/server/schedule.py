@@ -15,6 +15,7 @@ from typing import assert_never
 from error import TransExitCode
 from framing import FrameBad, FrameBadReason, FrameEof, FrameOk, FrameOut, encode_frame, read_frame
 from adapter import MaybeParsedRequest, Reply, ProtoState, StateEnum, build_replies, parse_request, step
+from childproto import BadChildMsg, ChildEvent, ChildRequest, ChildResponse, parse_child_msg, request_msg
 
 def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
@@ -33,6 +34,177 @@ async def spawn_child(argv: list[str]) -> asyncio.subprocess.Process:
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
     )
+#end def
+
+
+class ChildGoneError(RuntimeError):
+    """EOF 路（decision 8）：child 已死/失联，请求立即失败，不烧 timeout。"""
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+    #end def
+#end class
+
+
+class ChildRequestError(RuntimeError):
+    """应用级：child 明确应答 ok=False（参考 _ChildRequestError 同形 server.py:153-155）。"""
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+    #end def
+#end class
+
+
+@dataclass
+class _Channel:
+    """每 child 一份的缝内状态：pending 表 + reader task + 单写者锁。
+
+    句柄=裸 Process（用户选型），缝内状态挂模块级注册表，不包壳不挂 Process。
+    """
+    proc: asyncio.subprocess.Process
+    pending: dict = field(default_factory=dict)                      # id → Future
+    write_lock: asyncio.Lock = field(default_factory=asyncio.Lock)   # 单写者（contract）
+    next_id: int = 0
+    dead: bool = False
+    reader_task: asyncio.Task | None = None
+#end class
+
+
+_CHANNELS: dict = {}   # Process → _Channel；child_close 随册
+
+
+def _channel_for(child) -> _Channel:
+    ch = _CHANNELS.get(child)
+    if ch is None:
+        ch = _Channel(proc=child)
+        _CHANNELS[child] = ch
+        ch.reader_task = asyncio.get_running_loop().create_task(_read_child(ch))
+    #end if
+    return ch
+#end def
+
+
+def _fail_pending(ch: _Channel, detail: str) -> None:
+    """EOF/坏帧路：在途请求全部 ChildGoneError 快败（decision 8），表清空（不变量②）。"""
+    ch.dead = True
+    log(f"child_gone detail={detail}")
+    for fut in ch.pending.values():
+        if not fut.done():
+            fut.set_exception(ChildGoneError("child_gone", detail))
+        #end if
+    #end for
+    ch.pending.clear()
+#end def
+
+
+async def _read_child(ch: _Channel) -> None:
+    """reader task：帧分流（response→resolve Future；event→砖3 留位；EOF/坏帧→child-gone）。"""
+    reader = ch.proc.stdout
+    assert reader is not None                # spawn_child 保证 stdout=PIPE
+    try:
+        while True:
+            frame = await read_frame(reader)
+            match frame:
+                case FrameOk(payload=msg):
+                    parsed = parse_child_msg(msg)
+                    match parsed:
+                        case ChildResponse():
+                            fut = ch.pending.pop(parsed.id, None)
+                            if fut is not None and not fut.done():
+                                if parsed.ok:
+                                    fut.set_result(parsed.result or {})
+                                else:
+                                    err = parsed.error or {}
+                                    fut.set_exception(ChildRequestError(
+                                        str(err.get("code", "unknown")),
+                                        str(err.get("message", ""))))
+                                #end if
+                            #end if
+                        case ChildEvent():
+                            log(f"child_event event={parsed.event} params={parsed.params}")   # D3 留位：砖3 接回流
+                        case BadChildMsg(reason=reason, detail=detail):
+                            _fail_pending(ch, f"malformed child message: {reason} {detail}")
+                            return
+                        case _:
+                            assert_never(parsed)
+                    #end match
+                case FrameEof():
+                    _fail_pending(ch, "service session exited (stdout EOF)")
+                    return
+                case FrameBad(reason=reason, detail=detail):
+                    _fail_pending(ch, f"malformed child frame: {reason.name} {detail}")
+                    return
+                case _:
+                    assert_never(frame)   # 穷尽性：ADT 加员忘接=构造期大声失败
+            #end match
+        #end while
+    except asyncio.CancelledError:
+        raise                              # close 路取消：随关闭消亡
+    except Exception as e:                 # stdout 已死等读崩：同 child-gone 路
+        _fail_pending(ch, f"child reader crashed: {e!r}")
+    #end try
+#end def
+
+
+async def child_request(child, cmd: str, params: dict | None = None, timeout: float = 10.0) -> dict:
+    """一次内部请求-应答往返（correlation=id→Future）。
+
+    decision 8：发前 child 已死或通道已死 → ChildGoneError 立即，不烧 timeout；
+    超时/EOF 抢同一在途请求=先到先得（不变量④），失败路 pending 必清（不变量②）。
+    """
+    ch = _channel_for(child)
+    if ch.dead or (child.returncode is not None):   # asyncio 版 poll()：watcher 回填 returncode
+        raise ChildGoneError("child_gone", "service session is no longer running")
+    #end if
+    ch.next_id += 1
+    req_id = ch.next_id
+    fut = asyncio.get_running_loop().create_future()
+    ch.pending[req_id] = fut
+    try:
+        try:
+            async with ch.write_lock:      # 单写者：字节序权威（contract）
+                msg = request_msg(ChildRequest(id=req_id, cmd=cmd, params=params or {}))
+                child.stdin.write(encode_frame(msg))
+                await child.stdin.drain()
+            #end with
+        except (BrokenPipeError, ConnectionResetError, RuntimeError) as e:
+            raise ChildGoneError("child_gone", f"service child unreachable: {e!r}") from e
+        #end try
+        return await asyncio.wait_for(fut, timeout=timeout)
+    except asyncio.TimeoutError:
+        raise TimeoutError(f"child request {cmd!r} timed out after {timeout}s")
+    finally:
+        ch.pending.pop(req_id, None)       # 成功/超时/gone 三路同清（不变量②）
+    #end try
+#end def
+
+
+async def child_ping(child, timeout: float = 10.0) -> dict:
+    """启动握手探活（=child_request("ping") 薄别名；心跳已退役，见 design-notes）。"""
+    return await child_request(child, "ping", {}, timeout)
+#end def
+
+
+async def child_close(child) -> None:
+    """收场：关 stdin 走 child 自杀路（exit0）→ 优雅窗 2s → 强杀。幂等（不变量③）。"""
+    ch = _CHANNELS.pop(child, None)
+    if ch is not None and ch.reader_task is not None:
+        ch.reader_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await ch.reader_task
+        #end with
+    #end if
+    if child.stdin is not None and not child.stdin.is_closing():
+        child.stdin.close()
+    #end if
+    try:
+        await asyncio.wait_for(child.wait(), timeout=2.0)
+    except asyncio.TimeoutError:
+        child.kill()
+        await child.wait()
+    #end try
 #end def
 
 @dataclass

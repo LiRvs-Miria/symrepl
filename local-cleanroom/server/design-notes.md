@@ -283,4 +283,12 @@ FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
 
 **挂钉（撞到即裁）**：版本校验行为 / 请求级失败回给客户端的线形状（归砖2 接状态机时）
 
+**通道选型 review（2026-10-16，对等攻防后维持管道）**：管道/UDS/TCP/shm/RPC/进程内六路过堂。EOF 可靠性管道≈UDS>TCP（自纠：此前把 EOF 列为管道对 socket 的优势不精确，赢在零管理非 EOF 本身）；shm 无阻塞语义无 EOF（stdin-EOF 自杀作废）；TCP 半开死角复活心跳机；rpc 引第三方违反纯 Python 红线。结构性理由：fork-and-hold 亲缘关系的原生通道=继承 fd；收场哲学（退场门/stdin-EOF 自杀/decision 8）全踩在"死亡=EOF"上。解耦四维称重：代码/知识耦合管道是解耦器本身（session.py 纯 stdlib 零父依赖为证），契约耦合=不可再减最小值（childproto 收拢），部署耦合是唯一真输家且=单会话架构的故意。外部校准：LSP/DAP 标准传输即 stdio。保险丝：通道被缝关着，跨机/独立 child 之需出现时只动 spawn/读写/session.py io 三处。
+
+**子进程依赖裁决（2026-10-16，A 案）**：维持 `-m symrepl.dap.service` 原包依赖至 5c。理由：拷贝快照断不了奶（framing 旧类 API/ session 两行 import 仍指原包；改用 cleanroom framing 需重写阻塞读线程=5c 的活提前）+漂移影子文件；真断奶时刻=5c（新 service 用 cleanroom framing+重写 session），届时拷入就地重写。
+**同日翻案（用户裁）→ 桩案**：不依赖原包，cleanroom 自持**桩 service.py**（形状=真线协议：Content-Length 帧/pong 形状 `{pong:true, service_version:1}`/id 回显/stdin-EOF exit0；真逻辑后续填，文件连续演进）。session.py 桩暂不立（YAGNI，撞到 launch 桩再立）。探针 child 解释器翻转为 `sys.executable`+本地桩，SKIP 分支退役，砖 1 网全封闭。风险闸：桩对真分歧由探针钉死真线形状防住（形状源=真 service.py:28-34/:94）；"死讯传得回"语义不变——桩必须忠实实现 stdin-EOF exit0。
+
+**砖1 落地（2026-10-16，AI 转录，契约+网先行）**：childproto（T0）→ spawn_child（T2）→ child_request 机制全块（_Channel 注册表+reader task 帧分流+Future 表+单写者锁+close 优雅窗/强杀/幂等）。**网炸两处转录错**：①`poll()` 是 Popen API，asyncio Process 无此物——`returncode is not None` 才是 asyncio 版 liveness（T1-T5 齐 RED 当场逮）；②T4 探针设计洞——会应答的桩答得太快，kill 前请求已完结，"在途"是假的；改哑 child（不答话）保真在途。**契约增补**：应用级 `ChildRequestError`（child 应答 ok=False，参考 _ChildRequestError 同形 server.py:153-155）——"异常两类"之外的第三类，属应答面非退场门。**T7 增补**：decision 8 前半（发前已死→快败）原探针没钉，补齐。终态：**8 探针全绿+转移表 14+framing 无回归**。
+
 **命名（2026-10-16 用户铸名）**：statemachine.py → **adapter.py**——业务角色名（DAP 适配器的协议面：能力/生命周期/会话状态机）替代实现载体名（状态机）。childproto 定位=**执行层协议的词汇表+编解码**（边界层）：它解析内部协议的帧形状，不解析命令语义——命令语义与 LLDB 操作在管道对端子进程（`_dispatch`→session）；管道不是调用栈。5c 重写时 childproto 可升级为父子共享契约层。
+**桩子进程文件铸名（2026-10-16 用户裁）**：service.py → **session.py**——"进程即会话"（ADR "one child per session"，进程生死=会话生死是它的结构本质）；与 src 语义层 session.py 短期同名靠目录分辨，5c 归一。

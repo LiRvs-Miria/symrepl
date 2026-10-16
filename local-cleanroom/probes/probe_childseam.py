@@ -8,8 +8,8 @@
 - close=优雅窗 2s+强杀，幂等；单写者；Future 表无泄漏
 
 跑法：python3 probe_childseam.py
-环境：SYMREPL_PY 覆盖 child 解释器（缺省 ~/venvs/symrepl/bin/python，
-     需 symrepl editable + lldb 可导入——T1/T4/T5/T6 依赖；缺失则 SKIP 非 FAIL）
+child=本地桩 ../server/service.py（2026-10-16 桩案：形状忠实真协议，真逻辑后续填），
+解释器=sys.executable——全封闭，无 venv/lldb 依赖，无 SKIP。
 """
 import asyncio
 import os
@@ -21,7 +21,7 @@ from pathlib import Path
 SRV_DIR = str(Path(__file__).resolve().parent.parent / "server")
 sys.path.insert(0, SRV_DIR)
 
-PY = os.environ.get("SYMREPL_PY") or str(Path.home() / "venvs" / "symrepl" / "bin" / "python")
+CHILD = [sys.executable, str(Path(SRV_DIR) / "session.py")]
 
 results = []
 
@@ -57,13 +57,10 @@ async def t0_childproto_algebra():
 
 async def t1_handshake_clean_exit():
     """T1 握手+干净退场：spawn 真服务 → ping→pong → close → child exit 0。"""
-    if not Path(PY).exists():
-        return "SKIP", f"child 解释器缺 {PY}"
     import schedule
     with tempfile.NamedTemporaryFile(suffix=".log", delete=False) as f:
         logpath = f.name
-    child = await schedule.spawn_child(
-        [PY, "-m", "symrepl.dap.service", "--log", logpath])
+    child = await schedule.spawn_child(CHILD + ["--log", logpath])
     pong = await schedule.child_ping(child, timeout=10.0)
     assert pong == {"pong": True, "service_version": 1}, f"pong 形状偏: {pong}"
     await schedule.child_close(child)
@@ -104,15 +101,16 @@ async def t3_hang_timeout():
 
 
 async def t4_eof_fails_fast():
-    """T4 EOF 路：在途请求时 child 被杀 → ChildGoneError 快败（decision 8，不烧 timeout）。"""
-    if not Path(PY).exists():
-        return "SKIP", f"child 解释器缺 {PY}"
+    """T4 EOF 路：在途请求时 child 被杀 → ChildGoneError 快败（decision 8，不烧 timeout）。
+
+    用哑 child（不答话）保请求真正在途——会应答的桩答得太快，kill 前请求已完结。
+    """
     import schedule
     child = await schedule.spawn_child(
-        [PY, "-m", "symrepl.dap.service", "--log", os.devnull])
+        [sys.executable, "-c", "import time; time.sleep(30)"])
     task = asyncio.ensure_future(
         schedule.child_request(child, "ping", {}, timeout=30.0))
-    await asyncio.sleep(0.5)  # 让请求先上线
+    await asyncio.sleep(0.3)  # 请求先上线（帧入管道，future 已登记）
     child.kill()
     t0 = time.monotonic()
     try:
@@ -129,11 +127,8 @@ async def t4_eof_fails_fast():
 
 async def t5_generic_request():
     """T5 泛化请求：child_request 走 correlation 全链（ping 只是载荷）。"""
-    if not Path(PY).exists():
-        return "SKIP", f"child 解释器缺 {PY}"
     import schedule
-    child = await schedule.spawn_child(
-        [PY, "-m", "symrepl.dap.service", "--log", os.devnull])
+    child = await schedule.spawn_child(CHILD + ["--log", os.devnull])
     result = await schedule.child_request(child, "ping", {}, timeout=10.0)
     assert result == {"pong": True, "service_version": 1}, f"result 偏: {result}"
     await schedule.child_close(child)
@@ -141,11 +136,8 @@ async def t5_generic_request():
 
 async def t6_close_idempotent():
     """T6 close 幂等：重复关、关已死 child，均不炸。"""
-    if not Path(PY).exists():
-        return "SKIP", f"child 解释器缺 {PY}"
     import schedule
-    child = await schedule.spawn_child(
-        [PY, "-m", "symrepl.dap.service", "--log", os.devnull])
+    child = await schedule.spawn_child(CHILD + ["--log", os.devnull])
     await schedule.child_close(child)
     await schedule.child_close(child)  # 重复关
     stub = await schedule.spawn_child(
@@ -153,6 +145,24 @@ async def t6_close_idempotent():
     stub.kill()
     await asyncio.wait_for(stub.wait(), timeout=5)
     await schedule.child_close(stub)  # 关已死者
+
+
+async def t7_request_after_death():
+    """T7 发前已死：child 死透后发请求 → ChildGoneError 立即，不烧 timeout（decision 8 前半）。"""
+    import schedule
+    child = await schedule.spawn_child(CHILD + ["--log", os.devnull])
+    await schedule.child_close(child)
+    t0 = time.monotonic()
+    try:
+        await schedule.child_request(child, "ping", {}, timeout=10.0)
+    except schedule.ChildGoneError:
+        elapsed = time.monotonic() - t0
+        assert elapsed < 3.0, f"快败应即时，耗了 {elapsed:.1f}s"
+    except TimeoutError:
+        raise AssertionError("child 已死却走了超时路——decision 8 被烧穿")
+    else:
+        raise AssertionError("child 已死请求竟成功")
+    #end try
 
 
 CASES = [
@@ -163,6 +173,7 @@ CASES = [
     ("T4 EOF 快败(decision 8)", t4_eof_fails_fast),
     ("T5 泛化请求 correlation", t5_generic_request),
     ("T6 close 幂等", t6_close_idempotent),
+    ("T7 发前已死快败", t7_request_after_death),
 ]
 
 
