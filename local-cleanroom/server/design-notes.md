@@ -246,3 +246,29 @@ FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
 **落地记录（2026-10-15 当日）**：AI 转录实现（用户骨架+契约），网炸出**两个转录 bug**：①Enum 成员值全 `=...`（typing 占位习惯）→同值即别名，五成员全是 LENGTH_OVERSIZE 的别名，reason.name 永远打第一个——auto() 才是无值声明；②isdigit 闸没 strip 冒号后空格→**所有正常帧被拒**（server 收合法帧当 FrameBad 关连接，转移表/shutdown 探针 EOF 三连）——替换旧宽容（int() 吞空白）前先弄清它宽容了什么。修复后 30 探针全绿（framing 8+转移表 14+shutdown 8）。两 bug 由两张不同的网各自抓获——单网单点，多网交叉才见全貌。探针迁 `local-cleanroom/probes/`（工装与源码分居）。**复述结算（2026-10-15，部分自达+纠错代念，挂账清）**：层次切分✓（ErrReply 生于 request 解析后，坏帧走不到）；chaos 映射 2/3✓（半帧、未读完就关→STREAM_TRUNCATED）；没踩过坑如实说✓（不死者不诈）。纠错三处入账：no-resync——回完也没有"之后"；坏 CL=FORMAT ≠ 太长=OVERSIZE（两个洞别合并）；外包代价=依赖方实现细节漏进错误契约（洞3 即实证）+混沌测试只能走真 socket，收益=少写一个状态机（鲁棒性是转包不是变好）
 
 **复述结算（2026-10-15，部分自达+纠错代念，挂账清）**：层次切分✓（ErrReply 生于 request 解析后，坏帧走不到）；chaos 映射 2/3✓（半帧、未读完就关→STREAM_TRUNCATED）；没踩过坑如实说✓（不死者不诈）。纠错三处入账：no-resync——回完也没有"之后"；坏 CL=FORMAT ≠ 太长=OVERSIZE（两个洞别合并）；外包代价=依赖方实现细节漏进错误契约（洞3 即实证）+混沌测试只能走真 socket，收益=少写一个状态机（鲁棒性是转包不是变好）
+
+## 砖1 契约：child 缝（childproto.py + schedule 缝函数）（2026-10-16，AI 转录稿待用户过目）
+
+**先验与收敛裁决（用户）**：ping=启动握手专用；心跳+置信区间**撤除**——裁决口径=**复杂度/收益权衡妥协非证伪**（stdio 管道故障面不可穷举；个人 PC 可用性>可靠性，"能用即使稍微不易用不可靠可接受"），EOF+超时双网实证漏检时此门可复议。**退场门统一：EOF（死）∪ 请求超时（挂死）→ 同一扇门**；不问原因按 observable 判死（对齐 2026-10-14 账本教训）。child 日志=child 自己的 `--log` 参数（参考同款 service.py:392-398）。
+
+**childproto.py**（形状转录自参考 service.py:28-34；用户裁决⑥=独立文件自定义形状）：
+- `VERSION = 1`（版本校验行为未裁——挂钉，撞到即裁）
+- ADT（NamedTuple，具名构造同 statemachine 哲学）：`ChildRequest(id, cmd, params)` / `ChildResponse(id, ok, result, error)` / `ChildEvent(event, params)`
+- `request_msg(req) -> dict`；`parse_child_msg(msg: dict) -> ChildResponse | ChildEvent | BadChildMsg`（值 ADT，错误前置；type 分流 response/event/未知）
+- 线格式复用 framing（同 Content-Length；读法同 asyncio StreamReader——"缓冲外包 asyncio"决策直接继承）
+
+**schedule.py 缝函数（签名）**：
+- `spawn_child(argv: list[str]) -> Child`（asyncio create_subprocess_exec，stdin/stdout PIPE；interp 不存在=立即抛）
+- `child_ping(child, timeout) -> dict`（=child_request("ping") 薄别名）
+- `child_request(child, cmd, params, timeout) -> dict`（correlation=id→Future 表；**decision 8：child 已死立即失败不烧 timeout**）
+- `child_close(child) -> None`（关 stdin 走 child 自杀路 exit 0；优雅窗 2s 过后强杀；**幂等**）
+- 异常两类：`ChildGoneError`（EOF 路）与内建 `TimeoutError`（超时路）——两路喂同一退场门但异常可辨
+- 单写者：stdin 写唯一入口（参考 decision 7 同款）
+
+**不变量**：①全部住壳/缝，零入 statemachine ②Future 表在超时/EOF 路必须 pop（无泄漏）③close 幂等（已死再关不炸）④EOF 与超时竞争同一在途请求=先到先得，两路都能败
+
+**预埋攻击点**：stdin 并发写交错 / Future 泄漏 / close 重入 / interp 不存在的 spawn
+
+**探针**：`probe_childseam.py` T0–T6（代数往返/握手+干净退场/spawn 快败/挂死超时/EOF 快败/泛化请求/close 幂等），RED 起步；SYMREPL_PY 环境变量覆盖 child 解释器（缺省 `~/venvs/symrepl/bin/python`）
+
+**挂钉（撞到即裁）**：版本校验行为 / 请求级失败回给客户端的线形状（归砖2 接状态机时）
