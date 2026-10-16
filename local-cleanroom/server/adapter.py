@@ -1,7 +1,8 @@
-"""statemachine — 会话协议状态机（核心，纯函数版，契约 v4.1）。
+"""adapter — DAP 适配器的协议面（核心，纯函数版，契约 v4.1）。
 
-pipeline：parse_request（边界解析，dict→类型）→ step（模式匹配状态转移）
-→ build_replies（回包+seq 账本）。核内零 I/O、零原地突变、零裸字符串。
+业务角色=适配器：对客户端统一 DAP 语义（能力/生命周期/会话状态机）；
+实现载体=纯函数状态机（parse_request → step → build_replies 三段管线）。
+核内零 I/O、零原地突变、零裸字符串。
 
 状态与转移全部来自 design-notes.md 定稿：事件=转移条件，状态=能待着的东西。
 slot 即状态：PendingLaunch 非空 = S2。结果代数=Frame=Reply|Event（契约 v4/v4.1）：

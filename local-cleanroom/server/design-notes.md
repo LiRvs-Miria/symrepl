@@ -263,7 +263,7 @@ FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
 
 **childproto.py**（形状转录自参考 service.py:28-34；用户裁决⑥=独立文件自定义形状）：
 - `VERSION = 1`（版本校验行为未裁——挂钉，撞到即裁）
-- ADT（NamedTuple，具名构造同 statemachine 哲学）：`ChildRequest(id, cmd, params)` / `ChildResponse(id, ok, result, error)` / `ChildEvent(event, params)`
+- ADT（NamedTuple，具名构造同 adapter 哲学）：`ChildRequest(id, cmd, params)` / `ChildResponse(id, ok, result, error)` / `ChildEvent(event, params)`
 - `request_msg(req) -> dict`；`parse_child_msg(msg: dict) -> ChildResponse | ChildEvent | BadChildMsg`（值 ADT，错误前置；type 分流 response/event/未知）
 - 线格式复用 framing（同 Content-Length；读法同 asyncio StreamReader——"缓冲外包 asyncio"决策直接继承）
 
@@ -275,10 +275,12 @@ FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
 - 异常两类：`ChildGoneError`（EOF 路）与内建 `TimeoutError`（超时路）——两路喂同一退场门但异常可辨
 - 单写者：stdin 写唯一入口（参考 decision 7 同款）
 
-**不变量**：①全部住壳/缝，零入 statemachine ②Future 表在超时/EOF 路必须 pop（无泄漏）③close 幂等（已死再关不炸）④EOF 与超时竞争同一在途请求=先到先得，两路都能败
+**不变量**：①全部住壳/缝，零入 adapter（协议面）②Future 表在超时/EOF 路必须 pop（无泄漏）③close 幂等（已死再关不炸）④EOF 与超时竞争同一在途请求=先到先得，两路都能败
 
 **预埋攻击点**：stdin 并发写交错 / Future 泄漏 / close 重入 / interp 不存在的 spawn
 
 **探针**：`probe_childseam.py` T0–T6（代数往返/握手+干净退场/spawn 快败/挂死超时/EOF 快败/泛化请求/close 幂等），RED 起步；SYMREPL_PY 环境变量覆盖 child 解释器（缺省 `~/venvs/symrepl/bin/python`）
 
 **挂钉（撞到即裁）**：版本校验行为 / 请求级失败回给客户端的线形状（归砖2 接状态机时）
+
+**命名（2026-10-16 用户铸名）**：statemachine.py → **adapter.py**——业务角色名（DAP 适配器的协议面：能力/生命周期/会话状态机）替代实现载体名（状态机）。childproto 定位=**执行层协议的词汇表+编解码**（边界层）：它解析内部协议的帧形状，不解析命令语义——命令语义与 LLDB 操作在管道对端子进程（`_dispatch`→session）；管道不是调用栈。5c 重写时 childproto 可升级为父子共享契约层。

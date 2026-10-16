@@ -14,7 +14,7 @@ from typing import assert_never
 
 from error import TransExitCode
 from framing import FrameBad, FrameBadReason, FrameEof, FrameOk, FrameOut, encode_frame, read_frame
-from statemachine import MaybeParsedRequest, Reply, ProtoState, StateEnum, build_replies, parse_request, step
+from adapter import MaybeParsedRequest, Reply, ProtoState, StateEnum, build_replies, parse_request, step
 
 
 def log(msg: str) -> None:
