@@ -16,11 +16,24 @@ from error import TransExitCode
 from framing import FrameBad, FrameBadReason, FrameEof, FrameOk, FrameOut, encode_frame, read_frame
 from adapter import MaybeParsedRequest, Reply, ProtoState, StateEnum, build_replies, parse_request, step
 
-
 def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 #end def
 
+async def spawn_child(argv: list[str]) -> asyncio.subprocess.Process:
+    """spawn service 子进程：stdin/stdout 双管道，父↔child 协议通道由此而生。
+
+    选型（用户裁 2026-10-16）：句柄=asyncio.subprocess.Process 裸用不包壳；
+    Future 表与 reader task 随 child_request 机制走，不挂此处。
+    stderr 继承：child hygiene 前的早期事故（import 失败等）落进本进程
+    stderr 日志流；hygiene 后 child 的输出归 --log，此路静默。
+    """
+    return await asyncio.create_subprocess_exec(
+        *argv,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+    )
+#end def
 
 @dataclass
 class ConnState:
