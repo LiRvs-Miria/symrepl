@@ -2,7 +2,7 @@
 
 > 本文件是会话进度快照，冷启动从此取活。
 > 配套：[`local-cleanroom/server/design-notes.md`](local-cleanroom/server/design-notes.md)（设计档案，随码走，含契约/裁决/命名/通道选型全记录）、[`../research-survey/plan/ai-independence.md`](../research-survey/plan/ai-independence.md)（承重协议 v1.3，§2.6 决策节律）、[`../research-survey/plan/ai-ledger.md`](../research-survey/plan/ai-ledger.md)（对账账本，追加式）。
-> 前史：`local-test-phase1-progress.md`（2026-10-12 关账）/ `local-test-phase2-progress.md`（2026-10-15 收官）**已完成使命，只读存档不再更新**。
+> 前史：phase1（2026-10-12 关账）/ phase2（2026-10-15 收官）的 local-test* 档案已删除（2026-10-16），内容沉淀已蒸馏完毕（设计→design-notes、对账/格式知识→账本、开放问题→design-notes 注记），考古走 git 历史。
 
 ## 总纲（已定裁决，勿重议）
 
