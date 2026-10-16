@@ -47,13 +47,19 @@ def send(protocol_out, obj: dict) -> None:
 
 
 def handle(protocol_out, msg: dict) -> None:
-    if msg.get("cmd") == "ping":
+    cmd = msg.get("cmd")
+    if cmd == "ping":
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
                             "result": {"pong": True, "service_version": VERSION}})
+    elif cmd == "launch":
+        # 砖2：接单确认（真回放引擎未填，原地演化）。形状对齐参考 _cmd_launch（result.pid）。
+        # pid=本进程真 pid（砖2 先验④代码先行裁）：探针钉形状不钉值。
+        send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
+                            "result": {"pid": os.getpid()}})
     else:
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
                             "error": {"code": "unknown_command",
-                                      "message": f"stub: {msg.get('cmd')!r}"}})
+                                      "message": f"stub: {cmd!r}"}})
     #end if
 #end def
 

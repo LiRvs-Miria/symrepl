@@ -24,10 +24,10 @@
 ## 待办（交替队列）
 
 ### 协议线
-- [ ] **砖2 launch 接线**（当前口令）：spawn 接线到 launch 门 + 专属状态成型（D2 纯核×I/O 接缝撞真章）。业务事实=派工链路：验单（ktest 可解析/target 存在，废单不惊动会话员）→叫人→交单→接单确认即广播 **process+initialized**（对齐参考 server.py:390-399）→正式答复仍扣到 configurationDone。悬钉（撞到即裁）：①专属状态名/形状，与"slot 即 S2"不变量关系 ②筹备期失败→第三扇门帧序（ErrReply 后 terminated 与否）③process 事件桩 pid 给不给 ④ktest 第一跳（参数真实流到桩子）
+- [ ] **砖2 launch 接线**（进行中——先验已裁+RED 基线已立，**冻结点=接线实现待开工**）。**已裁**：①launch 履约成功即广播 process+initialized 两事件（专属状态→S2 转移 frames；caps 只在 initialize 应答）②立场乙：child 死/无应答=父活陪到底快败（六答①"进终态"部分翻案：失败=ErrReply+留 S1 可重递；退场门收缩为客户端侧 FIN/RST/坏帧）③履约两步=先行诊断（败不惊动会话员）+spawn 握手（败=上游类 ErrReply）④桩 pid=自身真 pid，探针钉形状。**RED 基线**：probe_launch L1/L2 共 2 FAIL 精确落在 process 事件缺位（本砖唯一增量），砖1 行为全兼容；childseam 8 绿+转移表 ALL PASS。**悬钉**：专属状态名（用户铸，暂名 LAUNCHING 可用）与 slot 不变量关系、ktest 第一跳实现形状
 - [ ] 砖3 configurationDone 放行 + stopped 事件回流（D3：无请求事件进 seq 账本）
 - [ ] 砖4 收场路（disconnect 带 child 拆除、退出码归类）
-- [ ] 砖5 child 死路混沌探针（退场哲学兑现）
+- [ ] 砖5 child 死路混沌探针（**立场乙**：父活快败陪到底，对齐参考 decision 8——原"退场哲学兑现"表述作废）
 - [ ] 横向 11+1 条（每条=完整循环，先验=用户出题表）：threads（最简首发）→ stackTrace（守卫入门）→ scopes/variables（世代票据首撞）→ continue（运行态+事件流）→ setBreakpoints → next/stepIn/stepOut/pause → terminate → replay.branchTrace（引擎集大成，横向收尾）
 - [ ] 收尾清单：stdio 模式、cli.py:151 接线改挂、pytest DAP 面 41 项改挂、ADR 注（shutdown 退役注+新架构）、原包 dap 四件退役、5c 真逻辑填实
 
