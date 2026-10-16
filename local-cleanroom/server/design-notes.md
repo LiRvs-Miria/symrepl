@@ -285,6 +285,9 @@ FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
 
 **通道选型 review（2026-10-16，对等攻防后维持管道）**：管道/UDS/TCP/shm/RPC/进程内六路过堂。EOF 可靠性管道≈UDS>TCP（自纠：此前把 EOF 列为管道对 socket 的优势不精确，赢在零管理非 EOF 本身）；shm 无阻塞语义无 EOF（stdin-EOF 自杀作废）；TCP 半开死角复活心跳机；rpc 引第三方违反纯 Python 红线。结构性理由：fork-and-hold 亲缘关系的原生通道=继承 fd；收场哲学（退场门/stdin-EOF 自杀/decision 8）全踩在"死亡=EOF"上。解耦四维称重：代码/知识耦合管道是解耦器本身（session.py 纯 stdlib 零父依赖为证），契约耦合=不可再减最小值（childproto 收拢），部署耦合是唯一真输家且=单会话架构的故意。外部校准：LSP/DAP 标准传输即 stdio。保险丝：通道被缝关着，跨机/独立 child 之需出现时只动 spawn/读写/session.py io 三处。
 
+**M1↔M2 同构观察（2026-10-16 用户发现，填真逻辑阶段的施工图）**：父-子架构本身就是 M1 一次性回放架构的交互态泛化——①spawn 隔离契约逐字保留（ADR "verbatim"）②LLDB 只在子 ③ktest 经父传入（argv→env 两跳；decision 11 原始路径不重序列化）④回放引擎（预扫分支/resume 循环/trace 采集/走向推断）=待填主体。
+**同段翻案（2026-10-16 用户裁）**："复用铺路/非从零写"结论**作废**——M2 cleanroom 对原 replay 引擎**零代码继承**：LLDB 件直接对真实 lldb API 原生实现；回放核心（ktest 解析/预扫描断点/走向推断/trace 采集报告）在 cleanroom **真正重写**，多范式（更多 FP）+错误前置比旧代码更严格。M1 引擎角色=**行为 oracle**（同 ktest/target 上对账输出），非代码来源。知识传承走规格不走代码：ktest 格式知识（phase1 账本逐字节）+行为规则语义（decision 7 owner-thread/11 原路径/12 世代票据）+坑清单（read1/复用 no-op/事件排空）。M1 CLI 产品路径不动（旧引擎继续服务一次性回放），cleanroom 平行第二实现，收敛/删旧押后不预设。
+
 **子进程依赖裁决（2026-10-16，A 案）**：维持 `-m symrepl.dap.service` 原包依赖至 5c。理由：拷贝快照断不了奶（framing 旧类 API/ session 两行 import 仍指原包；改用 cleanroom framing 需重写阻塞读线程=5c 的活提前）+漂移影子文件；真断奶时刻=5c（新 service 用 cleanroom framing+重写 session），届时拷入就地重写。
 **同日翻案（用户裁）→ 桩案**：不依赖原包，cleanroom 自持**桩 service.py**（形状=真线协议：Content-Length 帧/pong 形状 `{pong:true, service_version:1}`/id 回显/stdin-EOF exit0；真逻辑后续填，文件连续演进）。session.py 桩暂不立（YAGNI，撞到 launch 桩再立）。探针 child 解释器翻转为 `sys.executable`+本地桩，SKIP 分支退役，砖 1 网全封闭。风险闸：桩对真分歧由探针钉死真线形状防住（形状源=真 service.py:28-34/:94）；"死讯传得回"语义不变——桩必须忠实实现 stdin-EOF exit0。
 

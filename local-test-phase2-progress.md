@@ -1,5 +1,7 @@
 # local-test-phase2 推进状态（阶段二开工 2026-10-13：M2 DAP 链路；§3/§4/§5 完成，§6 改为动手验收；两线合流为四阶段。2026-10-14：阶段 1 v6 改道代码骨架交付，①③④关账；2026-10-15：**收官——四阶段全关账**：①clean-room 重写（复述结算 7/8，六偏离源码全证清账）②深读 server.py（OQ-1~4 黑盒+源码双通道对案）③shutdown 断路器 ④framing 值 ADT+三洞三闸——③④经用户裁决改道 clean-room，真代码库原案打包押后（见挂账墙）；探针网 30 项全绿（probes/），双仓已推）
 
+> **本文件已完成使命（2026-10-16 起冻结为只读存档）**：phase2 全关账；阶段 5（cleanroom 转正）移交 **[`local-cleanroom-progress.md`](local-cleanroom-progress.md)**，冷启动请读新档。下文内容冻结快照，其中的挂账墙/待办以新档为准（shutdown 已退役、capability 再验已撞结等后续变动不再回写本文件）。
+
 > 本文件是**会话进度快照**，供在新环境（VM opencode）恢复阶段二学习流程。
 > 配套：[`local-test-phase2.md`](local-test-phase2.md)（任务书）、`../research-survey/plan/ai-independence.md`（承重协议）、`../research-survey/plan/ai-ledger.md`（对账账本，截至 2026-10-15 共 24 条：phase1 六条 + phase2 全程含方法论修正）。
 > **承重协议必须维持：预测先行，AI 不得代写先验。**（P1–P3 已于 2026-10-13 锁定并对账，"先验前不读源码"约束已解除；动手验收的新先验规则：语义/设计先验先写，再读对应源码——见待办阶段 1/3）
