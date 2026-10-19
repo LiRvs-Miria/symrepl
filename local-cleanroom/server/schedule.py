@@ -181,7 +181,7 @@ async def child_request(child, cmd: str, params: dict | None = None, timeout: fl
                 child.stdin.write(encode_frame(msg))
                 await child.stdin.drain()
             #end with
-        except (BrokenPipeError, ConnectionResetError, RuntimeError) as e:
+        except Exception as e:                # 写路一断=通道死（单一结局）；翻译在此一行
             raise ChildGoneError("child_gone", f"service child unreachable: {e!r}") from e
         #end try
         return await asyncio.wait_for(fut, timeout=timeout)
