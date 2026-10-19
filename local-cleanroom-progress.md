@@ -34,7 +34,7 @@
 ### 引擎线（每件配 oracle 对账网：M1 同 ktest/target 输出 diff）
 - [ ] E1 ktest 解析重写（纯件：真 ktest 文件喂，对账 M1 parse；值 ADT/错误前置风格首发——格式知识=phase1 账本逐字节）
 - [ ] E2 BranchSite/预扫描语义 + 走向推断（纯件：合成 PC 序列网；语义源=branches.py is_conditional/infer_outcomes，代码不入境）
-- [ ] E3 LLDB 会话原语（launch/entry stop/resume/事件排空；真靶子=`~/replay-build/get_sign` + `third_party/klee/ktest/get_sign_test000003.ktest`，配方 tests/conftest.py；坑清单入规格：read1/复用 no-op/事件排空规则/owner-thread）
+- [ ] ~~E3 LLDB 会话原语~~✅ 2026-10-19（lldb_session.py：launch 入口停/resume/事件排空/单进程单 debugger 守门；新坑三枚+lldb-server 定位入规格；probe_e3 三 ktest oracle diff=0；靶子按 conftest 配方即建 /tmp/opencode/replay-build/get_sign）
 - [ ] E4 会话编排（一次性循环→请求驱动；trace 按需报告，exit 后经 output 事件推——OQ-2 锚点 :803-810）
 
 ## 红线

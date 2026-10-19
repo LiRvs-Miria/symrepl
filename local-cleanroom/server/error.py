@@ -10,7 +10,7 @@ class TransExitCode(IntEnum):
     ABRUPT = 2
 #end class
 
-# 会话错误码（代数：1xxx=协议层，2xxx=上游；无兜底，炸穿直接补专属码）
+# 会话错误码（代数：1xxx=协议层，2xxx=上游，3xxx=执行面 LLDB 会话原语；无兜底，炸穿直接补专属码）
 class InternalErrCode(IntEnum):
     OK = 0
     BAD_PROTOCOL = 1001
@@ -18,6 +18,20 @@ class InternalErrCode(IntEnum):
     EVENT_NOT_ALLOWED = 1003   # 事件在当前协议状态不允许（A1 决策：粗类码，细节走 detail）
     UPSTREAM_TIMEOUT = 2001
     UPSTREAM_REFUSED = 2002
+#end class
+
+# 执行面错误码（lldb_session 壳路异常用；纯核错误当值返回不经此）
+class SessionErrCode(IntEnum):
+    DEBUGGER_EXISTS = 3001     # 单进程单 debugger 契约（复用 no-op 坑）
+    BAD_TARGET = 3002
+    LAUNCH_FAILED = 3003
+    ENTRY_NOT_STOPPED = 3004
+    EVENT_TIMEOUT = 3005
+    NOT_EXITED = 3006
+    NO_LLDB = 3007
+    NO_LLDB_SERVER = 3008
+    BAD_ARGS = 3009
+    RESUME_FAILED = 3010
 #end class
 
 class ProtoError(NamedTuple):
