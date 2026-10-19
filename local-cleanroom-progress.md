@@ -24,7 +24,7 @@
 ## 待办（交替队列）
 
 ### 协议线
-- [ ] **砖2 launch 接线**（进行中——先验已裁+RED 基线已立，**冻结点=接线实现待开工**）。**已裁**：①launch 履约成功即广播 process+initialized 两事件（专属状态→S2 转移 frames；caps 只在 initialize 应答）②立场乙：child 死/无应答=父活陪到底快败（六答①"进终态"部分翻案：失败=ErrReply+留 S1 可重递；退场门收缩为客户端侧 FIN/RST/坏帧）③履约两步=先行诊断（败不惊动会话员）+spawn 握手（败=上游类 ErrReply）④桩 pid=自身真 pid，探针钉形状。**RED 基线**：probe_launch L1/L2 共 2 FAIL 精确落在 process 事件缺位（本砖唯一增量），砖1 行为全兼容；childseam 8 绿+转移表 ALL PASS。**悬钉**：专属状态名（用户铸，暂名 LAUNCHING 可用）与 slot 不变量关系、ktest 第一跳实现形状
+- [ ] **砖2 launch 接线**（**接线完成 2026-10-19：四网全绿，已提交 af38477，待验收关账**）。**已裁**：①launch 履约成功即广播 process+initialized 两事件（caps 只在 initialize 应答）②立场乙：child 死/无应答=父活陪到底快败（失败=ErrReply+留 S1 可重递；退场门收缩为客户端侧 FIN/RST/坏帧）③履约两步=先行诊断（败不惊动会话员）+spawn 握手（败=上游类 ErrReply）④桩 pid=自身真 pid。**落地=代数 v5（action+choice，用户裁根解，两案作废史见 design-notes）**：step 好单自回环驻 S1+携 `FulfillLaunch(req)`（"slot 非空=S2"不变量原样保留），壳 `run_effect` 执行（`except Exception` 全捕获无条件收尸+`_physical` 单点分类学末臂默认收编），核 `resolve` 落靶（两事件帧序/pid 形状闸/上游码归核，壳无语义）；Action 三员（占位 ForwardRequest/TearDownChild 防忘位）、Outcome 六员（含 Crashed）。**网况**：L1/L2 全绿；R6 网眼依法翻案（静默→两事件）；四网全绿；探针 odot 硬编码已相对化可跨机。**悬钉**：ktest 第一跳实现形状（E 线首撞）；砖3 才修 await 顶点+内部事件门（真异步源）
 - [ ] 砖3 configurationDone 放行 + stopped 事件回流（D3：无请求事件进 seq 账本）
 - [ ] 砖4 收场路（disconnect 带 child 拆除、退出码归类）
 - [ ] 砖5 child 死路混沌探针（**立场乙**：父活快败陪到底，对齐参考 decision 8——原"退场哲学兑现"表述作废）

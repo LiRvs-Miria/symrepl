@@ -10,7 +10,7 @@
 """
 import socket, subprocess, time, sys
 from pathlib import Path
-sys.path.insert(0, "/home/odot/github/symrepl/local-cleanroom/client")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "client"))
 import dap_client as dc
 
 SRV_DIR = str(Path(__file__).resolve().parent.parent / "server")

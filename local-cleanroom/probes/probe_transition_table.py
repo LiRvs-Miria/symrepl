@@ -1,10 +1,10 @@
 import socket, json, subprocess, time, signal, sys
 from pathlib import Path
-sys.path.insert(0, "/home/odot/github/symrepl/local-cleanroom/client")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "client"))
 import dap_client as dc
 
 SRV_DIR = str(Path(__file__).resolve().parent.parent / "server")
-KT = "/home/odot/github/symrepl/third_party/klee/ktest/get_sign_test000003.ktest"
+KT = str(Path(__file__).resolve().parent.parent.parent / "third_party/klee/ktest/get_sign_test000003.ktest")
 TG = "/tmp/opencode/replay-build/get_sign"
 fails = []
 
@@ -60,20 +60,21 @@ r, buf = dc.recv(s, buf)
 check("R4 未知命令回 not implemented", r["success"] is False and r["message"] == "not implemented")
 s.close(); p.terminate(); p.wait()
 
-# R5: S1 launch 坏参数 -> 1001；R6: 好参数 -> 扣响应（静默）；R7: S2 双发 -> launch_already_pending
+# R5: S1 launch 坏参数 -> 1001；R6: 好单 -> 两事件广播；R7: S2 双发 -> launch_already_pending
 p = start(); s, buf, seq = session()
 dc.send(s, seq, "initialize", {"adapterId": "symrepl"}); dc.recv(s, buf)
 dc.send(s, seq, "launch", {"ktest": KT})
 r, buf = dc.recv(s, buf)
 check("R5 S1 launch 缺 target -> 1001", r["success"] is False and code_of(r)[0] == 1001)
+# R6（砖2 翻案）: launch 好单→壳履约→两事件广播（process 带 pid 先，initialized 随后）；
+# launch 响应仍扣着（R8 验放行）
 dc.send(s, seq, "launch", {"ktest": KT, "target": TG})
-held = True
-try:
-    s.settimeout(1.2); dc.recv(s, buf); held = False   # 1.2s 内不该有任何帧
-except socket.timeout:
-    pass
-check("R6 launch 好参数被扣（线上静默）", held)
-s.settimeout(3)
+e1, buf = dc.recv(s, buf)
+e2, buf = dc.recv(s, buf)
+check("R6 launch 好单→两事件（process 带 pid 先，initialized 随后）",
+      e1.get("type") == "event" and e1.get("event") == "process"
+      and isinstance((e1.get("body") or {}).get("systemProcessId"), int)
+      and e2.get("type") == "event" and e2.get("event") == "initialized")
 dc.send(s, seq, "launch", {"ktest": KT, "target": TG})
 r, buf = dc.recv(s, buf)
 check("R7 S2 双发拒 launch_already_pending", r["success"] is False and "launch_already_pending" in code_of(r)[1])
