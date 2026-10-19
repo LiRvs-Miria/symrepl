@@ -79,11 +79,17 @@ dc.send(s, seq, "launch", {"ktest": KT, "target": TG})
 r, buf = dc.recv(s, buf)
 check("R7 S2 双发拒 launch_already_pending", r["success"] is False and "launch_already_pending" in code_of(r)[1])
 
-# R8: configurationDone -> 两帧，launch 响应先（req_seq 判序）；R9: disconnect -> 成功 + exit 0
+# R8: configurationDone -> 放行帧（launch 响应先）；砖3 起 stopped 事件同场竞争（三帧收齐验）
 dc.send(s, seq, "configurationDone")
-r1, buf = dc.recv(s, buf); r2, buf = dc.recv(s, buf)
-check("R8 放行两帧且 launch 响应先", r1["command"] == "launch" and r2["command"] == "configurationDone"
-      and r1["success"] and r2["success"])
+got = []
+for _ in range(3):
+    f, buf = dc.recv(s, buf)
+    got.append(f)
+#end for
+li = next((i for i, f in enumerate(got) if f.get("command") == "launch"), None)
+ci = next((i for i, f in enumerate(got) if f.get("command") == "configurationDone"), None)
+check("R8 放行两帧且 launch 响应先", None not in (li, ci) and li < ci
+      and got[li]["success"] and got[ci]["success"])
 dc.send(s, seq, "disconnect", {"terminateDebuggee": True})
 r3, buf = dc.recv(s, buf)
 e, buf = dc.recv(s, buf)
