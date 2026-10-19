@@ -105,8 +105,11 @@ class FulfillLaunch(NamedTuple):
 #end class
 
 class ForwardRequest(NamedTuple):
-    """调试命令薄代理：父收单转递对端，应答原路回（未接——砖3 横向首撞落位）。"""
+    """调试命令薄代理：父收单转递对端，应答原路回。
+    cmd/params=子进程侧命令（核定名，壳盲发）；req=原始 DAP 请求（resolve 造应答用）。"""
     req: ParsedRequest
+    cmd: str
+    params: dict
 #end class
 
 class TearDownChild(NamedTuple):
@@ -226,10 +229,10 @@ def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
                                                     "event not allowed in current state",
                                                     "no launch in flight"),))
             #end if
-            # 放行：launch 应答从 stash 的 request 现场构造（契约 v2），launch 先发（偏离#6）
-            return StepResult(state=pstate._replace(phase=StateEnum.S3, slot=None),
-                              frames=(OkReply(request=pending.request, payload={}),
-                                      OkReply(request=req, payload={})))
+            # 放行先递对端（对齐参考 server.py:461 config_done 先于双帧）：携动作自回环驻 S2，
+            # slot 原样扣着；落靶归 resolve（成→S3+双帧，败→双帧皆败）
+            return StepResult(state=pstate,
+                              action=ForwardRequest(req=req, cmd="config_done", params={}))
 
         case (_, Command.DISCONNECT):
             # 断路器：任何状态无守卫直达终态（偏离#5）；清 slot=丢弃整个状态；
@@ -264,6 +267,17 @@ def _refused(pstate: ProtoState, req: ParsedRequest, message: str, detail: str) 
 #end def
 
 
+def _release_failed(pstate: ProtoState, req: ParsedRequest,
+                    code: InternalErrCode, message: str, detail: str) -> StepResult:
+    """放行败臂：双帧皆败（slot 扣的 launch 单+configDone），留 S2+slot 可重递
+    （立场乙同类；参考烧 slot 的形状不取）。"""
+    launch_req = pstate.slot.request if pstate.slot is not None else req
+    return StepResult(state=pstate,
+                      frames=(err_reply(launch_req, code, message, detail),
+                              err_reply(req, code, message, detail)))
+#end def
+
+
 def resolve(pstate: ProtoState, action: Action, outcome: Outcome) -> StepResult:
     """完成在途转移：action×outcome 逐对落靶。占位动作在此即大声失败（未被机器声明过）。"""
     match action, outcome:
@@ -291,6 +305,30 @@ def resolve(pstate: ProtoState, action: Action, outcome: Outcome) -> StepResult:
             return _refused(pstate, req, "session refused launch", detail)
         case (FulfillLaunch(req), Crashed(detail)):
             return _refused(pstate, req, "launch errand crashed", detail)
+        case (ForwardRequest(req), Done()):
+            pending = pstate.slot
+            if pending is None:   # 不变量说 S2 蕴含非空；防御一把
+                return StepResult(state=pstate,
+                                  frames=(err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
+                                                    "event not allowed in current state",
+                                                    "no launch in flight"),))
+            #end if
+            # 放行双帧：launch 应答从 slot 扣单现场构造，launch 先发
+            return StepResult(state=pstate._replace(phase=StateEnum.S3, slot=None),
+                              frames=(OkReply(request=pending.request, payload={}),
+                                      OkReply(request=req, payload={})))
+        case (ForwardRequest(req), TimedOut(detail)):
+            return _release_failed(pstate, req, InternalErrCode.UPSTREAM_TIMEOUT,
+                                   "session did not answer configurationDone in time", detail)
+        case (ForwardRequest(req), Gone(detail)) | (ForwardRequest(req), SpawnFailed(detail)):
+            return _release_failed(pstate, req, InternalErrCode.UPSTREAM_REFUSED,
+                                   "session unavailable", detail)
+        case (ForwardRequest(req), Rejected(detail)):
+            return _release_failed(pstate, req, InternalErrCode.UPSTREAM_REFUSED,
+                                   "session refused configurationDone", detail)
+        case (ForwardRequest(req), Crashed(detail)):
+            return _release_failed(pstate, req, InternalErrCode.UPSTREAM_REFUSED,
+                                   "configurationDone errand crashed", detail)
         case _:
             raise AssertionError(f"unhandled transition: {action!r} / {outcome!r}")
     #end match

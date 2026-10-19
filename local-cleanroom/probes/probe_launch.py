@@ -3,7 +3,8 @@
 
 需求文本=design-notes「砖2 先验攻防定稿」：
 - L1 好单全链：initialize→caps；launch(好参)→[Event process(带 pid), Event initialized]
-  （顺序钉死，先验①）→configurationDone→[launch resp(body={}), configDone resp]（launch 先，R8 不变）
+  （顺序钉死，先验①）→configurationDone→{launch resp(body{}), configDone resp, Event stopped}
+  （launch resp 先于 configDone resp；stopped 与双帧不钉相对序——reader/handle 双路真竞争，D3 吃 seq）
   →disconnect→[resp, terminated]→会话毕 exit0
 - L2 废单不惊动：launch(坏参)→ErrReply（无事件、留 S1）→重递好单→**仅一对**事件→configDone 放行
 桩 pid=自身真 pid（先验④代码先行裁），探针钉形状不钉值。
@@ -79,16 +80,33 @@ def L1_happy_path():
         #end if
 
         dc.send(s, seq, "configurationDone")
-        r1, buf = recv_or_fail(s, buf, "launch resp")
-        ok_r1 = (r1 is not None and r1.get("type") == "response"
-                 and r1.get("command") == "launch" and r1.get("success") is True
-                 and r1.get("body") == {})
-        check(name + ": 放行第一帧=launch resp(body={})", ok_r1)
-        if ok_r1:
-            r2, buf = recv_or_fail(s, buf, "configDone resp")
-            check(name + ": 放行第二帧=configDone resp", r2 is not None
-                  and r2.get("command") == "configurationDone" and r2.get("success") is True)
-        #end if
+        # 砖3：放行三帧收齐再验——launch resp 字节必先于 configDone resp（同路顺序写），
+        # stopped 走 reader 路与双帧（handle 路）有真竞争，不钉相对序
+        got = []
+        for tag in ("放行帧1", "放行帧2", "放行帧3"):
+            f, buf = recv_or_fail(s, buf, tag)
+            if f is not None:
+                got.append(f)
+            #end if
+        #end for
+        launch_i = next((i for i, f in enumerate(got)
+                         if f.get("type") == "response" and f.get("command") == "launch"), None)
+        config_i = next((i for i, f in enumerate(got)
+                         if f.get("type") == "response" and f.get("command") == "configurationDone"), None)
+        stop_i = next((i for i, f in enumerate(got)
+                       if f.get("type") == "event" and f.get("event") == "stopped"), None)
+        ok_r1 = (launch_i is not None and got[launch_i].get("success") is True
+                 and got[launch_i].get("body") == {})
+        check(name + ": 放行含 launch resp(body={})", ok_r1)
+        ok_r2 = (config_i is not None and got[config_i].get("success") is True)
+        check(name + ": 放行含 configDone resp", ok_r2)
+        check(name + ": 双帧定序 launch 先于 configDone",
+              None not in (launch_i, config_i) and launch_i < config_i)
+        sb = (got[stop_i].get("body") or {}) if stop_i is not None else {}
+        check(name + ": stopped 事件（reason/threadId/allThreadsStopped 形状）",
+              stop_i is not None and isinstance(sb.get("reason"), str)
+              and isinstance(sb.get("threadId"), int)
+              and isinstance(sb.get("allThreadsStopped"), bool))
 
         dc.send(s, seq, "disconnect")
         r3, buf = recv_or_fail(s, buf, "disconnect resp")
@@ -148,10 +166,20 @@ def L2_bad_order_no_startle():
               is_event(e2, "initialized"))
 
         dc.send(s, seq, "configurationDone")
-        r1, buf = recv_or_fail(s, buf, "launch resp")
-        r2, buf = recv_or_fail(s, buf, "configDone resp")
-        check(name + ": configDone 放行双帧照旧", r1 is not None and r2 is not None
-              and r1.get("command") == "launch" and r2.get("command") == "configurationDone")
+        # 砖3：放行帧+stopped 共三帧竞争（同 L1），只验双帧都在且 launch 先
+        got = []
+        for tag in ("放行帧1", "放行帧2", "放行帧3"):
+            f, buf = recv_or_fail(s, buf, tag)
+            if f is not None:
+                got.append(f)
+            #end if
+        #end for
+        launch_i = next((i for i, f in enumerate(got)
+                         if f.get("type") == "response" and f.get("command") == "launch"), None)
+        config_i = next((i for i, f in enumerate(got)
+                         if f.get("type") == "response" and f.get("command") == "configurationDone"), None)
+        check(name + ": configDone 放行双帧照旧（launch 先）",
+              None not in (launch_i, config_i) and launch_i < config_i)
         s.close()
     finally:
         if p.poll() is None:

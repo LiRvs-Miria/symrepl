@@ -15,9 +15,9 @@ from typing import assert_never
 
 from error import TransExitCode
 from framing import FrameBad, FrameBadReason, FrameEof, FrameOk, FrameOut, encode_frame, read_frame
-from adapter import (Action, Crashed, Done, FulfillLaunch, Gone, MaybeParsedRequest, Outcome,
-                     Rejected, SpawnFailed, TimedOut, ProtoState, Reply, StateEnum, StepResult,
-                     build_replies, parse_request, resolve, step)
+from adapter import (Action, Crashed, Done, ForwardRequest, FulfillLaunch, Gone,
+                     MaybeParsedRequest, Outcome, Rejected, SpawnFailed, TimedOut, ProtoState,
+                     Reply, StateEnum, StepResult, build_replies, parse_request, resolve, step)
 from childproto import BadChildMsg, ChildEvent, ChildRequest, ChildResponse, parse_child_msg, request_msg
 
 SESSION_SCRIPT = str(Path(__file__).resolve().parent / "session.py")
@@ -252,6 +252,20 @@ async def run_effect(conn: "ConnState", action: Action) -> Outcome:
                 return outcome
             #end try
             conn.child = child                    # 会话肉身落册（砖3 事件源/砖4 拆除由此取）
+            return Done(result)
+        case ForwardRequest(cmd=cmd, params=params):
+            child = conn.child
+            if child is None:                     # S2 必然已履约；None=不变量洞，大声失败
+                raise AssertionError("ForwardRequest with no session child")
+            #end if
+            try:
+                result = await child_request(child, cmd, params)
+            except Exception as e:                # 全捕获；肉身非本差事产物不收尸（砖4 管拆除），
+                outcome = _physical(e)            # 对端死了自有 reader 的 EOF 路报丧
+                log(f"effect_failed action={type(action).__name__} "
+                    f"outcome={type(outcome).__name__} detail={e!r}")
+                return outcome
+            #end try
             return Done(result)
         case _:
             raise AssertionError(f"action not wired: {action!r}")

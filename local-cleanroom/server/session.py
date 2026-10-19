@@ -56,6 +56,13 @@ def handle(protocol_out, msg: dict) -> None:
         # pid=本进程真 pid（砖2 先验④代码先行裁）：探针钉形状不钉值。
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
                             "result": {"pid": os.getpid()}})
+    elif cmd == "config_done":
+        # 砖3：应答后吐 stopped 事件（模拟跑到入口即停；真引擎未填，原地演化）。
+        # params 用执行面词法（thread_id/all_threads_stopped），翻 DAP 词法是父侧的活。
+        send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True, "result": {}})
+        send(protocol_out, {"type": "event", "event": "stopped",
+                            "params": {"reason": "entry", "thread_id": 1,
+                                       "all_threads_stopped": True}})
     else:
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
                             "error": {"code": "unknown_command",
