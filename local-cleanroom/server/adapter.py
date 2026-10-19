@@ -95,9 +95,66 @@ class Event(NamedTuple):
 
 Frame = Reply | Event        # 线上帧的代数（契约 v4）：语义由构造点声明；Event 今日无生产者（dead until 阶段 2/3）
 
+
+# ---------- 动作与效果（核声明，壳执行） ----------
+
+class FulfillLaunch(NamedTuple):
+    """launch 履约动作：spawn 会话子进程→ping 握手→递 launch 单。
+    req 携单（先行诊断已过，两键保非空串）。"""
+    req: ParsedRequest
+#end class
+
+class ForwardRequest(NamedTuple):
+    """调试命令薄代理：父收单转递对端，应答原路回（未接——砖3 横向首撞落位）。"""
+    req: ParsedRequest
+#end class
+
+class TearDownChild(NamedTuple):
+    """收场拆除会话子进程：优雅窗→强杀（未接——砖4 disconnect 首撞落位）。"""
+#end class
+
+Action = FulfillLaunch | ForwardRequest | TearDownChild
+                             # 动作词汇表；执行侧 match 须穷尽（未接成员=显式大声失败）
+
+
+class Done(NamedTuple):
+    """对端按单应答（ok=True）。result 原样上交：内容壳不看，形状闸在 resolve。"""
+    result: dict
+#end class
+
+class TimedOut(NamedTuple):
+    """约期无应答。"""
+    detail: str
+#end class
+
+class Gone(NamedTuple):
+    """在途失联：EOF/管道断/发前已死。"""
+    detail: str
+#end class
+
+class SpawnFailed(NamedTuple):
+    """对端进程没起来。"""
+    detail: str
+#end class
+
+class Rejected(NamedTuple):
+    """对端明确拒单（ok=False 应答）。"""
+    detail: str
+#end class
+
+class Crashed(NamedTuple):
+    """执行器未预期异常（默认臂）：差事没走完，责任在父侧执行。"""
+    detail: str
+#end class
+
+Outcome = Done | TimedOut | Gone | SpawnFailed | Rejected | Crashed
+                             # 壳只报物理事实（异常→构造器）；码/话术/靶态归 resolve
+
+
 class StepResult(NamedTuple):
     state: ProtoState
     frames: tuple[Frame, ...] = ()   # 帧数不携带语义：扣的静默归 slot 承载（slot 即 S2），放行=构造点排好的双帧
+    action: Action | None = None     # 动作槽：非空=转移在途，落靶由 resolve 按 Outcome 选
 #end class
 
 
@@ -157,10 +214,9 @@ def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
                                   frames=(err_reply(req, InternalErrCode.BAD_PROTOCOL,
                                                     "bad launch parameters", e),))
             #end if
-            # 放：请求入 slot，扣响应（线上静默——设计灵魂）
-            return StepResult(state=pstate._replace(phase=StateEnum.S2,
-                                                    slot=PendingLaunch(request=req)),
-                              frames=())
+            # 诊断过：自回环驻 S1，履约交壳执行，落靶归 resolve（成→S2+slot，败→留 S1 可重递）。
+            # 请求不在此入 slot："slot 非空=S2"不变量原样保留
+            return StepResult(state=pstate, action=FulfillLaunch(req))
 
         case (StateEnum.S2, Command.CONFIGURATION_DONE):
             pending = pstate.slot
@@ -195,6 +251,48 @@ def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
                               frames=(err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
                                                 "event not allowed in current state",
                                                 f"{req.raw_command} not allowed in {phase.name}"),))
+    #end match
+#end def
+
+
+# ---------- resolve：choice 落靶（在途转移按 Outcome 定靶与帧；码/话术/靶态全在此，壳无语义） ----------
+
+def _refused(pstate: ProtoState, req: ParsedRequest, message: str, detail: str) -> StepResult:
+    """2002 败臂：留 S1 可重递；slot 从未建立，状态账自动干净。"""
+    return StepResult(state=pstate,
+                      frames=(err_reply(req, InternalErrCode.UPSTREAM_REFUSED, message, detail),))
+#end def
+
+
+def resolve(pstate: ProtoState, action: Action, outcome: Outcome) -> StepResult:
+    """完成在途转移：action×outcome 逐对落靶。占位动作在此即大声失败（未被机器声明过）。"""
+    match action, outcome:
+        case (FulfillLaunch(req), Done(result)):
+            pid = result.get("pid")
+            if not isinstance(pid, int):          # 形状闸：管对面的承诺不兑现=拒单
+                return _refused(pstate, req, "session refused launch",
+                                f"launch result pid is not an int: {pid!r}")
+            #end if
+            return StepResult(
+                state=pstate._replace(phase=StateEnum.S2, slot=PendingLaunch(request=req)),
+                frames=(Event(event="process",
+                              body={"systemProcessId": pid,
+                                    "isLocalProcess": True,
+                                    "startMethod": "launch",
+                                    "name": req.arguments["target"]}),
+                        Event(event="initialized", body={})))
+        case (FulfillLaunch(req), TimedOut(detail)):
+            return StepResult(state=pstate,
+                              frames=(err_reply(req, InternalErrCode.UPSTREAM_TIMEOUT,
+                                                "session did not answer launch in time", detail),))
+        case (FulfillLaunch(req), Gone(detail)) | (FulfillLaunch(req), SpawnFailed(detail)):
+            return _refused(pstate, req, "session unavailable", detail)
+        case (FulfillLaunch(req), Rejected(detail)):
+            return _refused(pstate, req, "session refused launch", detail)
+        case (FulfillLaunch(req), Crashed(detail)):
+            return _refused(pstate, req, "launch errand crashed", detail)
+        case _:
+            raise AssertionError(f"unhandled transition: {action!r} / {outcome!r}")
     #end match
 #end def
 

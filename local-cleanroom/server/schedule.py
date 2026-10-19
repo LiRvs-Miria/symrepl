@@ -10,12 +10,17 @@ import functools
 import signal
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import assert_never
 
 from error import TransExitCode
 from framing import FrameBad, FrameBadReason, FrameEof, FrameOk, FrameOut, encode_frame, read_frame
-from adapter import MaybeParsedRequest, Reply, ProtoState, StateEnum, build_replies, parse_request, step
+from adapter import (Action, Crashed, Done, FulfillLaunch, Gone, MaybeParsedRequest, Outcome,
+                     Rejected, SpawnFailed, TimedOut, ProtoState, Reply, StateEnum, StepResult,
+                     build_replies, parse_request, resolve, step)
 from childproto import BadChildMsg, ChildEvent, ChildRequest, ChildResponse, parse_child_msg, request_msg
+
+SESSION_SCRIPT = str(Path(__file__).resolve().parent / "session.py")
 
 def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
@@ -207,12 +212,60 @@ async def child_close(child) -> None:
     #end try
 #end def
 
+def _physical(e: Exception) -> Outcome:
+    """异常→物理事实：认类型给构造器（TimeoutError ⊂ OSError，序在前）；
+    末臂默认收编——异常分类学只改本函数，except 面不再动。"""
+    match e:
+        case TimeoutError():
+            return TimedOut(repr(e))
+        case ChildGoneError():
+            return Gone(repr(e))
+        case ChildRequestError():
+            return Rejected(repr(e))
+        case OSError():
+            return SpawnFailed(repr(e))
+        case _:
+            return Crashed(repr(e))
+    #end match
+#end def
+
+
+async def run_effect(conn: "ConnState", action: Action) -> Outcome:
+    """效果执行器：核声明、壳执行。成功只落册肉身与上交 result（内容不看），
+    失败收尸（幂等）并报物理事实。"""
+    match action:
+        case FulfillLaunch(req):
+            child = None
+            try:
+                child = await spawn_child([sys.executable, SESSION_SCRIPT])
+                await child_ping(child)
+                result = await child_request(child, "launch",
+                                             {"ktest": req.arguments["ktest"],
+                                              "target": req.arguments["target"]})
+            except Exception as e:                # 全捕获：收尸无条件；分类归 _physical
+                if child is not None:
+                    await child_close(child)      # 半死也收；幂等
+                #end if
+                outcome = _physical(e)
+                log(f"effect_failed action={type(action).__name__} "
+                    f"outcome={type(outcome).__name__} detail={e!r}")
+                return outcome
+            #end try
+            conn.child = child                    # 会话肉身落册（砖3 事件源/砖4 拆除由此取）
+            return Done(result)
+        case _:
+            raise AssertionError(f"action not wired: {action!r}")
+    #end match
+#end def
+
+
 @dataclass
 class ConnState:
     # 世界对象（协议状态之外，永远留在壳里）
     active_writer: asyncio.StreamWriter | None = None
     client_done: asyncio.Event = field(default_factory=asyncio.Event)
     exit_code: int = 0          # TransExitCode 的 int 值（FIN=0 / ABRUPT=2）
+    child: asyncio.subprocess.Process | None = None   # 会话肉身（run_effect 成功后落册；砖4 拆除取用）
     # 壳搬运的两本账：协议状态 + 回包 seq
     pstate: ProtoState = ProtoState(phase=StateEnum.S0)
     seq: int = 1
@@ -246,6 +299,11 @@ async def handle(reader: asyncio.StreamReader,
                         frames, new_pstate = (parsed,), conn.pstate
                     else:
                         result = step(conn.pstate, parsed)
+                        if result.action is not None:
+                            # 在途转移：壳执行动作，核落靶（协议语义不过壳）
+                            outcome = await run_effect(conn, result.action)
+                            result = resolve(result.state, result.action, outcome)
+                        #end if
                         frames, new_pstate = result.frames, result.state
                     #end if
                     out_frames, conn.seq = build_replies(frames, conn.seq)
