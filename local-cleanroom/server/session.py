@@ -63,6 +63,10 @@ def handle(protocol_out, msg: dict) -> None:
         send(protocol_out, {"type": "event", "event": "stopped",
                             "params": {"reason": "entry", "thread_id": 1,
                                        "all_threads_stopped": True}})
+    elif cmd == "threads":
+        # 横向首发：单线程契约的假数据（真 inferior 归引擎线），形状对齐参考 session.threads。
+        send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
+                            "result": {"threads": [{"id": 1, "name": "thread-1"}]}})
     else:
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
                             "error": {"code": "unknown_command",

@@ -29,6 +29,7 @@ class Command(Enum):
     LAUNCH = "launch"
     CONFIGURATION_DONE = "configurationDone"
     DISCONNECT = "disconnect"
+    THREADS = "threads"
 #end class
 
 def match_command(cmd: str) -> "Command | None":
@@ -39,6 +40,7 @@ def match_command(cmd: str) -> "Command | None":
         case "launch":            return Command.LAUNCH
         case "configurationDone": return Command.CONFIGURATION_DONE
         case "disconnect":        return Command.DISCONNECT
+        case "threads":           return Command.THREADS
         case _:                   return None
     #end match
 #end def
@@ -234,6 +236,11 @@ def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
             return StepResult(state=pstate,
                               action=ForwardRequest(req=req, cmd="config_done", params={}))
 
+        case (StateEnum.S3, Command.THREADS):
+            # 调试命令代理首发：携动作自回环驻 S3，落靶归 resolve（子面同名 threads 空参）
+            return StepResult(state=pstate,
+                              action=ForwardRequest(req=req, cmd="threads", params={}))
+
         case (_, Command.DISCONNECT):
             # 断路器：任何状态无守卫直达终态（偏离#5）；清 slot=丢弃整个状态；
             # 帧序=响应先、terminated 后（2026-10-15 裁决 a：两门形状统一，对齐参考实测）
@@ -305,30 +312,48 @@ def resolve(pstate: ProtoState, action: Action, outcome: Outcome) -> StepResult:
             return _refused(pstate, req, "session refused launch", detail)
         case (FulfillLaunch(req), Crashed(detail)):
             return _refused(pstate, req, "launch errand crashed", detail)
-        case (ForwardRequest(req), Done()):
-            pending = pstate.slot
-            if pending is None:   # 不变量说 S2 蕴含非空；防御一把
-                return StepResult(state=pstate,
-                                  frames=(err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
-                                                    "event not allowed in current state",
-                                                    "no launch in flight"),))
-            #end if
-            # 放行双帧：launch 应答从 slot 扣单现场构造，launch 先发
-            return StepResult(state=pstate._replace(phase=StateEnum.S3, slot=None),
-                              frames=(OkReply(request=pending.request, payload={}),
-                                      OkReply(request=req, payload={})))
-        case (ForwardRequest(req), TimedOut(detail)):
-            return _release_failed(pstate, req, InternalErrCode.UPSTREAM_TIMEOUT,
-                                   "session did not answer configurationDone in time", detail)
-        case (ForwardRequest(req), Gone(detail)) | (ForwardRequest(req), SpawnFailed(detail)):
-            return _release_failed(pstate, req, InternalErrCode.UPSTREAM_REFUSED,
-                                   "session unavailable", detail)
-        case (ForwardRequest(req), Rejected(detail)):
-            return _release_failed(pstate, req, InternalErrCode.UPSTREAM_REFUSED,
-                                   "session refused configurationDone", detail)
-        case (ForwardRequest(req), Crashed(detail)):
-            return _release_failed(pstate, req, InternalErrCode.UPSTREAM_REFUSED,
-                                   "configurationDone errand crashed", detail)
+        case (ForwardRequest(req), Done(result)):
+            # 成臂按 DAP 命令分业务：放行=双帧（slot 扣单+现单）；普通代理=body 映射单帧
+            match req.command:
+                case Command.CONFIGURATION_DONE:
+                    pending = pstate.slot
+                    if pending is None:   # 不变量说 S2 蕴含非空；防御一把
+                        return StepResult(state=pstate,
+                                          frames=(err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
+                                                            "event not allowed in current state",
+                                                            "no launch in flight"),))
+                    #end if
+                    return StepResult(state=pstate._replace(phase=StateEnum.S3, slot=None),
+                                      frames=(OkReply(request=pending.request, payload={}),
+                                              OkReply(request=req, payload={})))
+                case Command.THREADS:
+                    # body 映射对齐参考 server.py:487：取 threads 键重包，不透传杂键
+                    return StepResult(state=pstate,
+                                      frames=(OkReply(request=req,
+                                                      payload={"threads": result.get("threads", [])}),))
+                case _:
+                    raise AssertionError(f"unhandled proxied command {req.command}")
+            #end match
+        case (ForwardRequest(req), outcome):
+            # 败臂按 DAP 命令分帧形：放行=双帧皆败（扣单+现单）；普通代理=单帧。码随物理事实。
+            match outcome:
+                case TimedOut(detail):
+                    code, message = (InternalErrCode.UPSTREAM_TIMEOUT,
+                                     f"session did not answer {req.raw_command} in time")
+                case Gone(detail) | SpawnFailed(detail):
+                    code, message = InternalErrCode.UPSTREAM_REFUSED, "session unavailable"
+                case Rejected(detail):
+                    code, message = (InternalErrCode.UPSTREAM_REFUSED,
+                                     f"session refused {req.raw_command}")
+                case Crashed(detail):
+                    code, message = (InternalErrCode.UPSTREAM_REFUSED,
+                                     f"{req.raw_command} errand crashed")
+                case _:
+                    raise AssertionError(f"unhandled outcome {outcome!r}")
+            #end match
+            if req.command is Command.CONFIGURATION_DONE:
+                return _release_failed(pstate, req, code, message, detail)
+            return StepResult(state=pstate, frames=(err_reply(req, code, message, detail),))
         case _:
             raise AssertionError(f"unhandled transition: {action!r} / {outcome!r}")
     #end match

@@ -28,7 +28,7 @@
 - [ ] 砖3 configurationDone 放行 + stopped 事件回流（**完成 2026-10-19：四网全绿，待验收关账**）——放行携 `ForwardRequest` 先递 `config_done` 后落双帧（败=双帧皆败留 S2 可重递，立场乙同类）；stopped 经 `translate_child_event` 只翻不判+壳 sink 回流领 seq（D3 兑现）；钉序=stopped 与双帧不钉相对序（宽容三帧网），事件不改协议状态（状态门留首个改状态砖再裁）；D3 留位注记退役
 - [ ] 砖4 收场路（disconnect 带 child 拆除、退出码归类）
 - [ ] 砖5 child 死路混沌探针（**立场乙**：父活快败陪到底，对齐参考 decision 8——原"退场哲学兑现"表述作废）
-- [ ] 横向 11+1 条（每条=完整循环，先验=用户出题表）：threads（最简首发）→ stackTrace（守卫入门）→ scopes/variables（世代票据首撞）→ continue（运行态+事件流）→ setBreakpoints → next/stepIn/stepOut/pause → terminate → replay.branchTrace（引擎集大成，横向收尾）
+- [ ] 横向 11+1 条（每条=完整循环，先验=用户出题表；**方向裁决 2026-10-19：砖4 收场路押后，横向先行**）：~~threads（最简首发）~~✅ 2026-10-19 五网全绿（落靶按 DAP 命令分业务；网炸败臂混用详见 design-notes；壳零改动=横向复利首证）→ stackTrace（守卫入门）→ scopes/variables（世代票据首撞）→ continue（运行态+事件流）→ setBreakpoints → next/stepIn/stepOut/pause → terminate → replay.branchTrace（引擎集大成，横向收尾）
 - [ ] 收尾清单：stdio 模式、cli.py:151 接线改挂、pytest DAP 面 41 项改挂、ADR 注（shutdown 退役注+新架构）、原包 dap 四件退役、5c 真逻辑填实
 
 ### 引擎线（每件配 oracle 对账网：M1 同 ktest/target 输出 diff）
