@@ -335,6 +335,28 @@ def resolve(pstate: ProtoState, action: Action, outcome: Outcome) -> StepResult:
 #end def
 
 
+# ---------- 子事件翻译（执行面词法 → DAP 词法；只翻不判：事件不改协议状态） ----------
+
+def translate_child_event(event: str, params: dict | None) -> Event | None:
+    """子事件 → DAP 事件；不认识的事件名=None（壳丢弃留痕）。
+    线形状对齐参考 server.py:769-781；exited/terminated 归砖4/砖5 的门。"""
+    params = params or {}
+    if event == "stopped":
+        body: dict = {"reason": params.get("reason", "exception"),
+                      "threadId": params.get("thread_id", 0),
+                      "allThreadsStopped": bool(params.get("all_threads_stopped", True))}
+        if params.get("description"):
+            body["description"] = params["description"]
+        #end if
+        if params.get("breakpoint_ids"):
+            body["hitBreakpointIds"] = params["breakpoint_ids"]
+        #end if
+        return Event(event="stopped", body=body)
+    #end if
+    return None
+#end def
+
+
 # ---------- build_replies：回包段（seq 账本在此） ----------
 
 def build_replies(frames: tuple[Frame, ...], seq: int):

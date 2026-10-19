@@ -9,6 +9,7 @@ import contextlib
 import functools
 import signal
 import sys
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import assert_never
@@ -17,7 +18,8 @@ from error import TransExitCode
 from framing import FrameBad, FrameBadReason, FrameEof, FrameOk, FrameOut, encode_frame, read_frame
 from adapter import (Action, Crashed, Done, ForwardRequest, FulfillLaunch, Gone,
                      MaybeParsedRequest, Outcome, Rejected, SpawnFailed, TimedOut, ProtoState,
-                     Reply, StateEnum, StepResult, build_replies, parse_request, resolve, step)
+                     Reply, StateEnum, StepResult, build_replies, parse_request, resolve, step,
+                     translate_child_event)
 from childproto import BadChildMsg, ChildEvent, ChildRequest, ChildResponse, parse_child_msg, request_msg
 
 SESSION_SCRIPT = str(Path(__file__).resolve().parent / "session.py")
@@ -74,6 +76,7 @@ class _Channel:
     next_id: int = 0
     dead: bool = False
     reader_task: asyncio.Task | None = None
+    sink: Callable[[ChildEvent], Awaitable[None]] | None = None   # 事件回流口（conn 侧注入；None=留痕丢弃）
 #end class
 
 
@@ -128,7 +131,11 @@ async def _read_child(ch: _Channel) -> None:
                                 #end if
                             #end if
                         case ChildEvent():
-                            log(f"child_event event={parsed.event} params={parsed.params}")   # D3 留位：砖3 接回流
+                            if ch.sink is not None:
+                                await ch.sink(parsed)          # 回流：翻译+领 seq+投递（D3）
+                            else:
+                                log(f"child_event event={parsed.event} params={parsed.params}")   # 无 sink=留痕丢弃
+                            #end if
                         case BadChildMsg(reason=reason, detail=detail):
                             _fail_pending(ch, f"malformed child message: {reason} {detail}")
                             return
@@ -230,6 +237,28 @@ def _physical(e: Exception) -> Outcome:
 #end def
 
 
+async def forward_event(conn: "ConnState", ev: ChildEvent) -> None:
+    """事件回流：核翻译（只翻不判）→ 领 seq（D3：无请求事件吃账本）→ 写客户端。
+    领号到回写不跨 await=原子；写完整帧=帧原子，与 handle 路的帧序竞争不钉（探针已宽容）。
+    客户端已走/写崩：事件无处投递即丢弃——异常沿 reader 路走，砖4/砖5 再裁边界。"""
+    event = translate_child_event(ev.event, ev.params)
+    if event is None:
+        log(f"child_event_dropped event={ev.event}")
+        return
+    #end if
+    frames, conn.seq = build_replies((event,), conn.seq)
+    writer = conn.active_writer
+    if writer is None:
+        log("child_event_dropped reason=no_client")
+        return
+    #end if
+    for out in frames:
+        writer.write(encode_frame(out))
+        await writer.drain()
+    #end for
+#end def
+
+
 async def run_effect(conn: "ConnState", action: Action) -> Outcome:
     """效果执行器：核声明、壳执行。成功只落册肉身与上交 result（内容不看），
     失败收尸（幂等）并报物理事实。"""
@@ -252,6 +281,7 @@ async def run_effect(conn: "ConnState", action: Action) -> Outcome:
                 return outcome
             #end try
             conn.child = child                    # 会话肉身落册（砖3 事件源/砖4 拆除由此取）
+            _channel_for(child).sink = functools.partial(forward_event, conn)   # 回流口随肉身就位
             return Done(result)
         case ForwardRequest(cmd=cmd, params=params):
             child = conn.child
