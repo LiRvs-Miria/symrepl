@@ -422,3 +422,36 @@ FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
 **预埋攻击点**：①reader 启动先于 hygiene=杂音污染 fd1（顺序钉死：hygiene→reader）②半帧 buf 跨线程共享（buf 活在 reader 内，队列只传完整 msg）③exited 一变二——translate 返回类型变更、forward_event 拆包忘改④exited 与 continue 响应竞争（秒退），探针宽容序收帧⑤close 对已 dead inferior 的幂等性（若炸当场见）⑥poll_events 在 phase dead 后持续空转（须终态短路防忙烧）。
 
 **落地记录（2026-10-20 当日）**：RED 6→步2 核转录（表一行；P1 转绿，test_core 11/11）→步3 四件套（适配器 continue_/poll_events+_read_event 取数助手重构、child reader 线程+owner 轮询循环、父面 translate 一变二、直测两行）。**网炸两枚**：①**端口面漏接单**——原语/泵/翻译全建而 handle 无 continue 分支（子面答 "unknown command 'continue'"，全件建成却忘了门牌）；②**terminated 双发**——child 按参考形状发 [exited, terminated] 对，父面一变二再展开=客户端三帧（terminated×2），帧序错位连锁误判三钉；修=**单源裁决**：child 只发执行面事实 exited，DAP 惯例展开（terminated 随 exited）归父面翻译。**契约勘误一枚**：P5 stale_reference 预测被守卫序推翻——参考相位先于世代解码，continue 后 inferior 秒退即 dead，not_stopped 先答；stale 真实触发待 setBreakpoints 砖产出第二次停相（pins 随砖迁移）。**网况**：probe_continue 12/12 ALL PASS+八网回归全绿。**真化里程碑**：DAP 生命周期首次全程可观测（launch→入口停→continue→exited+terminated）；响应不越其引发的事件由 child 单写者顺序天然保证（exited 先于 terminated 同源保序）。
+
+**落地记录（2026-10-20 当日）**：RED 6→步2 核转录（表一行；P1 转绿，test_core 11/11）→步3 四件套（适配器 continue_/poll_events+_read_event 取数助手重构、child reader 线程+owner 轮询循环、父面 translate 一变二、直测两行）。**网炸两枚**：①**端口面漏接单**——原语/泵/翻译全建而 handle 无 continue 分支（子面答 "unknown command 'continue'"，全件建成却忘了门牌）；②**terminated 双发**——child 按参考形状发 [exited, terminated] 对，父面一变二再展开=客户端三帧（terminated×2），帧序错位连锁误判三钉；修=**单源裁决**：child 只发执行面事实 exited，DAP 惯例展开（terminated 随 exited）归父面翻译。**契约勘误一枚**：P5 stale_reference 预测被守卫序推翻——参考相位先于世代解码，continue 后 inferior 秒退即 dead，not_stopped 先答；stale 真实触发待 setBreakpoints 砖产出第二次停相（pins 随砖迁移）。**网况**：probe_continue 12/12 ALL PASS+八网回归全绿。**真化里程碑**：DAP 生命周期首次全程可观测（launch→入口停→continue→exited+terminated）；响应不越其引发的事件由 child 单写者顺序天然保证（exited 先于 terminated 同源保序）。
+
+## setBreakpoints 契约（2026-10-20，第二次停相产出者；非纯代理首例=子面断点表；转录稿）
+
+**范围**：setBreakpoints 写命令（断点表=适配器私有会话态）+**断点命中上报**（stopped reason="breakpoint"+hitBreakpointIds——第二次停相产出者，not_stopped/stale_reference 负路真实触发+reason 推断同砖收口）。output 事件（inferior stdio 转发 decision 13）仍留后续。
+
+**参考线形状（规格来源，零代码继承）**：
+- 父面 server.py:583-618：params 提取（source.path+breakpoints[].line，字典项过滤）→`set_breakpoints` 盲发；成臂 `{"breakpoints": [{"verified": bp.get("verified", False), "line": bp.get("line")}]}`（键映射+verified 缺省 False）
+- 子会话 service:321-329：path 非 str→bad_request；lines 非 list→bad_request
+- 子会话 session.py:492-530（**断点表=适配器私有**）：process 无→not_launched；逐行验证（非 int/bool/<1→bad_request）；**全量替换**语义——先删全部自有断点再逐行 `BreakpointCreateByLocation`；invalid→`{"line": line, "verified": False}`；valid→resolved line（location address 的 line entry）+`{"line": resolved, "verified": True}`；自有 bp id 表 `_own_breakpoint_ids` 记册（**参考简化对齐**：单一全局断点集，非 per-source 分册——DAP per-source 语义在参考即简化，随迁）
+- 命中上报：stopped 事件 params 携 `breakpoint_ids`（父面 translate 已有 hitBreakpointIds 映射位）+reason="breakpoint"——**有意偏离 M1**：参考 `_on_stop` 的 record-and-auto-continue（branch site 表）是 M1 回放语义，cleanroom DAP 断点命中一律上报，site 表归 branchTrace 砖另议
+
+**核（adapter.py，表驱动一行）**：`Command.SET_BREAKPOINTS="setBreakpoints"`+宣言行；DEBUG_SPECS 行：params_fn（source.path+lines 提取照参考 :584-592）、body_fn（breakpoints 键映射+verified 缺省）
+
+**适配器（lldb_backend 增员）**：
+- Session 私有态：`_own_breakpoint_ids: list[int]`
+- `set_breakpoints(path, lines) -> dict`：全量替换（删旧记册→逐行创建）；invalid→`{"line": line, "verified": False}`；valid→address line entry 解析 resolved→`{"line": resolved, "verified": True}`+记册；回 `{"breakpoints": [...]}`
+- poll_events STOPPED 臂升级 **reason 推断**：thread.GetStopReason()==eStopReasonBreakpoint→reason="breakpoint"+`breakpoint_ids`（GetStopReasonDataAtIndex(0)）；否则 reason="exception"（既有）；phase→stopped
+- 命中即第二次停相：generation 已在 resume 时推进——旧世代帧 id/引用自此真实 stale
+
+**child（session.py）**：类型哨照家法（path 非 str→bad_request；lines 非 list→bad_request；行内逐项 int/bool/<1→bad_request——参考 decode 域归 child）+`_run` 键重包 `{"breakpoints": ...}`；Protocol+`set_breakpoints` 签名
+
+**网（probe_breakpoints.py，端口 5693）**：断点打 `get_sign.c` line 20（main 首句 klee_make_symbolic，必经之路；源码绝对路径=编译期记录）：
+- P1 S1 门 1003 / P2 全链→setBreakpoints [20,21]→两行 verified True+line int / P3 continue→**stopped(reason="breakpoint")**+hitBreakpointIds 非空+threadId int（第二停相产出）/ P4 第二停相面：stackTrace→帧 0 落 get_sign.c line 20（path 非空）→scopes(新帧 id)→Locals 新世代引用→variables 平铺（内容不钉）/ P5 **stale 真实触发**：scopes(frameId=0)（旧世代 0）→2002 携 stale_reference / P6 替换语义行为钉：setBreakpoints [21]→continue→停于 line 21（若旧 bp 20 残留则先停 20=替换失败当场见）/ P7 末轮 continue→exited+terminated（生命周期闭环）/ P8 收场+孤儿
+- RED 预期：P1-P5 FAIL（命令未知/断点不生效 continue 直通 exit）、P6 错位 FAIL、P7-P8 绿（生命周期事件已通）
+- test_core：setBreakpoints 出站映射（params_fn 提取）+成臂键映射直测两行
+
+**不变量**：壳零改动（表驱动照旧）；断点表对端口面不透明；命中上报走既有事件回流（sink→translate→hitBreakpointIds 位）；替换语义=全量删旧（参考简化随迁，per-source 分册不做）。
+
+**预埋攻击点**：①params_fn 嵌套提取（source 或缺/breakpoints 项非 dict 过滤）②resolved line 与请求行可能不同（地址回解析）——探针钉 verified+line int 不钉相等 ③GetStopReasonDataAtIndex(0)=bp id（LLDB 约定），data 计数 0 时不得越界 ④断点命中停相与 continue 响应竞争（同 continue 砖，宽容收帧）⑤reference 简化风险自警：全局单集断点在多源场景丢断点——DAP 客户端逐源调用时后调者清前者（参考即此行为，随迁）。
+
+**落地记录（2026-10-20 当日）**：RED 17 查 10 FAIL（P1-P7 红/P8 绿）→步2 核转录（Command.SET_BREAKPOINTS+宣言行+表一行；P1 转绿，test_core 12/12）→步3 四件套（backend：_own_breakpoint_ids 记册+set_breakpoints 原语+stop_reason_label 纯核推断+_ingest_enums 加 eStopReasonBreakpoint+poll_events STOPPED 臂升级携 breakpoint_ids；child：handle 门牌+_set_breakpoints 类型哨+键重包+Protocol 签名）。**网炸一枚（双键重包）**：契约内部互斥——适配器节写"回 {"breakpoints": [...]}"、child 节写"再重包"，首跑 P2 即炸 AttributeError: 'str' object has no attribute 'get'（父面 body_fn 遍历到内层 dict 的键串）；修=**bare list+child 重包**（家法同构：threads/stack_trace/scopes/variables 全同款），与 f4b1bca 网炸（裸 list 忘重包）成对——键重包家法的两个失败方向（忘包/双包）各实证一回，网各逮一枚。**守卫分布裁决**：类型域（path 非 str/lines 非 list/行内逐项 int·bool·<1）归 child（家法：参考 decode 域迁移）；not_launched（process 无）+空 path 留 backend（参考原位；child 的 _backend_ready 是另一条件——无实例≠无 process，父面 S1/S2 状态门挡不到的防御）。**RED 预测勘误（用户裁照单收）**：契约 RED 预期"P7-P8 绿"不成立——单链下 P3 continue 直通 exit，exited+terminated 在 P3 段已被消费，P7 再 continue 只答 not_stopped；实为 P1-P7 FAIL/P8 绿，GREEN 钉不变。**攻击点了结**：①嵌套提取过滤由 test_core 直测盖（非 dict 项滤除）②resolved line 实测与请求行同（20/21），探针只钉 verified+int 照旧 ③data 计数 0 越界防落 stop_reason_label（count>0 才取 data0）④命中停相与响应竞争照 continue 砖宽容收帧（段定员 3）⑤全局单集简化随迁照旧。**网况**：probe_breakpoints 17 查 ALL PASS+九网回归全绿（test_core 12/12+八探针网）；里程碑：断点命中第二停相全程可观测（launch→入口停→bp 停 L20→替换 L21→bp 停 L21→exit），stale_reference 负路自 continue 砖押后以来首次真实触发（世代票据消费侧闭环）。

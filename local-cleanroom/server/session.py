@@ -59,6 +59,11 @@ class DebugBackend(Protocol):
         ...
     #end def
 
+    def set_breakpoints(self, path: str, lines: list[int]) -> list[dict]:
+        """断点全量替换（参考简化：单一全局断点集）；回断点行裸清单。"""
+        ...
+    #end def
+
     def close(self) -> None:
         """收场拆除（inferior 随后端语义处置）。"""
         ...
@@ -159,6 +164,8 @@ def handle(protocol_out, msg: dict) -> None:
         _variables(protocol_out, msg)
     elif cmd == "continue":
         _run(protocol_out, msg, lambda: _backend_ready().continue_())
+    elif cmd == "set_breakpoints":
+        _set_breakpoints(protocol_out, msg)
     else:
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
                             "error": {"code": "unknown_command",
@@ -234,6 +241,32 @@ def _variables(protocol_out, msg: dict) -> None:
     #end if
     _run(protocol_out, msg,
          lambda: {"variables": _backend_ready().variables(ref)})  # 命令名键重包（父面按键取）
+#end def
+
+
+def _set_breakpoints(protocol_out, msg: dict) -> None:
+    """类型哨照家法（path 非 str/lines 非 list/行内逐项 int·bool·<1→bad_request，
+    参考 decode 域归 child）；后端回包经命令名键重包（父面按键取）。"""
+    params = msg.get("params") or {}
+    path = params.get("path")
+    if not isinstance(path, str):
+        _reply_err(protocol_out, msg, "bad_request", "path must be a string")
+        return
+    #end if
+    lines = params.get("lines")
+    if not isinstance(lines, list):
+        _reply_err(protocol_out, msg, "bad_request", "lines must be a list")
+        return
+    #end if
+    for line in lines:
+        if not isinstance(line, int) or isinstance(line, bool) or line < 1:
+            _reply_err(protocol_out, msg, "bad_request",
+                       f"invalid breakpoint line: {line!r}")
+            return
+        #end if
+    #end for
+    _run(protocol_out, msg,
+         lambda: {"breakpoints": _backend_ready().set_breakpoints(path, lines)})
 #end def
 
 

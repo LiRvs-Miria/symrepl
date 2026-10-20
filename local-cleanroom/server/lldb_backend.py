@@ -35,6 +35,7 @@ _lldb = None              # 进程内缓存（load 一次）
 _created = False          # 单进程单 debugger 的守门旗
 _STATE_TABLE: dict = {}   # 枚举常量→KnownState（load 后灌入，此后纯查表）
 _RUNNING_STATE: int = 0   # 同上（classify_event 用）
+_BREAKPOINT_REASON: int = 0   # 同上（stop_reason_label 用）
 
 
 # ---------- 纯核代数（plain 值进出；结果/错误当值返回；无 SB 调用、无环境读写） ----------
@@ -97,6 +98,17 @@ def classify_event(is_process: bool, proc_id: int | None,
 #end def
 
 
+def stop_reason_label(stop_reason: int, data_count: int,
+                      data_first: int) -> tuple[str, list[int]]:
+    """停相 reason 推断（纯）：断点命中携 bp id（GetStopReasonDataAtIndex(0)，
+    LLDB 约定）；data 计数 0 时不取（越界防）；余者 exception。"""
+    if stop_reason == _BREAKPOINT_REASON:
+        return "breakpoint", ([data_first] if data_count > 0 else [])
+    #end if
+    return "exception", []
+#end def
+
+
 def find_lldb_server(search_dirs: list[str]) -> LldbServer:
     """纯查找：按候选目录序找首个可执行 lldb-server*；无则 ServerNotFound（附因）。
     目录序由启动层构造（本函数不碰 PATH、不碰环境）。"""
@@ -119,12 +131,13 @@ def find_lldb_server(search_dirs: list[str]) -> LldbServer:
 
 def _ingest_enums(lldb) -> None:
     """枚举常量→plain 表（load 后一次性；此后判定纯查表）。"""
-    global _STATE_TABLE, _RUNNING_STATE
+    global _STATE_TABLE, _RUNNING_STATE, _BREAKPOINT_REASON
     _STATE_TABLE = {lldb.eStateStopped: KnownState.STOPPED,
                     lldb.eStateExited: KnownState.EXITED,
                     lldb.eStateCrashed: KnownState.CRASHED,
                     lldb.eStateDetached: KnownState.DETACHED}
     _RUNNING_STATE = int(lldb.eStateRunning)
+    _BREAKPOINT_REASON = int(lldb.eStopReasonBreakpoint)
 #end def
 
 
@@ -236,6 +249,7 @@ class Session:
             self._generation = 0                # 世代票据（decision 12）：frame id=generation*1000+index
             self._var_refs = {}                 # 变量引用账本（适配器私有）：ref→(generation, frame_index)
             self._ref_counter = 0               # 引用计数器：ref=generation*100000+counter（第二 id 空间）
+            self._own_breakpoint_ids: list[int] = []   # 自有断点 id 表（全量替换凭册删旧）
         except Exception as e:
             _created = True                     # 半初始化的 debugger 也是坑：进程内不许重试
             raise SessionError(_physical(e, SessionErrCode.BAD_TARGET), repr(e)) from e
@@ -334,10 +348,17 @@ class Session:
                 case Accept(state=KnownState.STOPPED):
                     self._phase = "stopped"
                     thread = self.process.GetThreadAtIndex(0)
-                    events.append({"event": "stopped",
-                                   "params": {"reason": "exception",   # 推断裂归 setBreakpoints 砖
-                                              "thread_id": int(thread.GetThreadID()),
-                                              "all_threads_stopped": True}})
+                    count = int(thread.GetStopReasonDataCount())
+                    reason, bp_ids = stop_reason_label(
+                        int(thread.GetStopReason()), count,
+                        int(thread.GetStopReasonDataAtIndex(0)) if count else 0)
+                    params = {"reason": reason,
+                              "thread_id": int(thread.GetThreadID()),
+                              "all_threads_stopped": True}
+                    if bp_ids:
+                        params["breakpoint_ids"] = bp_ids
+                    #end if
+                    events.append({"event": "stopped", "params": params})
                 case Accept(state=KnownState.EXITED) | Accept(state=KnownState.CRASHED):
                     code = int(self.process.GetExitStatus())
                     self._phase = "dead"
@@ -446,6 +467,47 @@ class Session:
             )
         #end for
         return variables
+    #end def
+
+    def set_breakpoints(self, path: str, lines: list[int]) -> list[dict]:
+        """断点全量替换（DAP per-source 语义，参考简化随迁：单一全局断点集）。
+        守卫：process 无→NOT_LAUNCHED；空 path→BAD_ARGS（类型域归 child）。
+        删旧凭册→逐行 BreakpointCreateByLocation；invalid→verified False；
+        valid→location address 的 line entry 解析 resolved+记册。
+        回断点行裸清单（{"breakpoints": …} 键重包归 child，家法同构）。"""
+        if self.process is None:
+            raise SessionError(SessionErrCode.NOT_LAUNCHED,
+                               "no session to place breakpoints in")
+        #end if
+        if not path:
+            raise SessionError(SessionErrCode.BAD_ARGS,
+                               "source path must be a string")
+        #end if
+        for bp_id in self._own_breakpoint_ids:
+            self.target.BreakpointDelete(bp_id)
+        #end for
+        self._own_breakpoint_ids = []
+        breakpoints = []
+        for line in lines:
+            bp = self.target.BreakpointCreateByLocation(path, line)
+            if not bp.IsValid():
+                breakpoints.append({"line": line, "verified": False})
+                continue
+            #end if
+            self._own_breakpoint_ids.append(int(bp.GetID()))
+            resolved = line
+            if bp.GetNumLocations() > 0:
+                # resolved line 经 location 的地址回解析（SBBreakpointLocation 无 GetLineInfo）
+                address = bp.GetLocationAtIndex(0).GetAddress()
+                if address.IsValid():
+                    entry = address.GetLineEntry()
+                    if entry.IsValid():
+                        resolved = int(entry.GetLine())
+                #end if
+            #end if
+            breakpoints.append({"line": resolved, "verified": True})
+        #end for
+        return breakpoints
     #end def
 
     def report_entry_stop(self) -> dict:

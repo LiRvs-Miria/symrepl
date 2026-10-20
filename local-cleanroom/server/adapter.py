@@ -35,6 +35,7 @@ class Command(Enum):
     SCOPES = "scopes"
     VARIABLES = "variables"
     CONTINUE = "continue"
+    SET_BREAKPOINTS = "setBreakpoints"
 #end class
 
 def match_command(cmd: str) -> "Command | None":
@@ -50,6 +51,7 @@ def match_command(cmd: str) -> "Command | None":
         case "scopes":            return Command.SCOPES
         case "variables":         return Command.VARIABLES
         case "continue":          return Command.CONTINUE
+        case "setBreakpoints":    return Command.SET_BREAKPOINTS
         case _:                   return None
     #end match
 #end def
@@ -252,6 +254,15 @@ DEBUG_SPECS: dict[Command, DebugSpec] = {
         child_cmd="continue",
         params=lambda args: {},                      # 参考参数忽略（单线程全续）
         body=lambda result: {"allThreadsContinued": result.get("all_threads_continued", True)}),
+    Command.SET_BREAKPOINTS: DebugSpec(
+        child_cmd="set_breakpoints",
+        params=lambda args: {"path": (args.get("source") or {}).get("path"),
+                             "lines": [bp.get("line")
+                                       for bp in args.get("breakpoints", [])
+                                       if isinstance(bp, dict)]},
+        body=lambda result: {"breakpoints": [{"verified": bp.get("verified", False),
+                                              "line": bp.get("line")}
+                                             for bp in result.get("breakpoints", [])]}),
 }
 
 

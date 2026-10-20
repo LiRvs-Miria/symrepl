@@ -120,6 +120,26 @@ ok = (len(frames) == 1 and frames[0]["success"] is True
       and frames[0]["body"] == {"allThreadsContinued": True})
 check("resolve: continue 成臂（allThreadsContinued 单源映射）", ok)
 
+# step（表驱动）：setBreakpoints 出站映射（source.path+breakpoints[].line，非 dict 项过滤）
+r = req_of("setBreakpoints", {"source": {"path": "/t.c", "name": "t.c"},
+                              "breakpoints": [{"line": 20}, "junk", {"line": 21}]})
+res = step(ProtoState(phase=StateEnum.S3), r)
+ok = (res.state.phase == StateEnum.S3 and isinstance(res.action, ForwardRequest)
+      and res.action.cmd == "set_breakpoints"
+      and res.action.params == {"path": "/t.c", "lines": [20, 21]})
+check("step: setBreakpoints 出站映射（source.path+breakpoints[].line，非 dict 项过滤）", ok)
+
+# resolve 成臂（表驱动）：setBreakpoints 键映射+verified 缺省 False
+r = req_of("setBreakpoints", {"source": {"path": "/t.c"}, "breakpoints": [{"line": 20}]})
+action = ForwardRequest(req=r, cmd="set_breakpoints", params={"path": "/t.c", "lines": [20]})
+res = resolve(ProtoState(phase=StateEnum.S3), action,
+              Done({"breakpoints": [{"line": 20, "verified": True}, {"line": 21}], "junk": 1}))
+frames, _ = build_replies(res.frames, 1)
+ok = (len(frames) == 1 and frames[0]["success"] is True
+      and frames[0]["body"] == {"breakpoints": [{"verified": True, "line": 20},
+                                                {"verified": False, "line": 21}]})
+check("resolve: setBreakpoints 成臂（键映射+verified 缺省 False，杂键滤除）", ok)
+
 
 if __name__ == "__main__":
     print("=" * 30)
