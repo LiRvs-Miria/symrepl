@@ -9,6 +9,7 @@ slot 即状态：PendingLaunch 非空 = S2。结果代数=Frame=Reply|Event（�
 语义由构造点声明，帧数不携带语义；非法状态不可表示（失败必携 ProtoError 是
 构造期事实，非运行时检查）；七种结果对号表见 design-notes。
 """
+from collections.abc import Callable
 from enum import Enum, IntEnum
 from typing import NamedTuple, assert_never
 from error import InternalErrCode, ProtoError
@@ -30,6 +31,7 @@ class Command(Enum):
     CONFIGURATION_DONE = "configurationDone"
     DISCONNECT = "disconnect"
     THREADS = "threads"
+    STACK_TRACE = "stackTrace"
 #end class
 
 def match_command(cmd: str) -> "Command | None":
@@ -41,6 +43,7 @@ def match_command(cmd: str) -> "Command | None":
         case "configurationDone": return Command.CONFIGURATION_DONE
         case "disconnect":        return Command.DISCONNECT
         case "threads":           return Command.THREADS
+        case "stackTrace":        return Command.STACK_TRACE
         case _:                   return None
     #end match
 #end def
@@ -203,6 +206,58 @@ def validate_launch(args: dict):
 #end def
 
 
+# ---------- 调试器命令层（S3 路由：命令规格表+通用执行器，与协议生命周期分离） ----------
+
+class DebugSpec(NamedTuple):
+    """调试命令规格：同构形状（参数翻译→盲发→键重包）写一次，每命令一行。"""
+    child_cmd: str                        # 子面核定名（壳盲发）
+    params: Callable[[dict], dict]        # 出站映射：DAP arguments → 子面 params
+    body: Callable[[dict], dict]          # 回程键映射：子面 result → DAP body
+#end class
+
+
+DEBUG_SPECS: dict[Command, DebugSpec] = {
+    Command.THREADS: DebugSpec(
+        child_cmd="threads",
+        params=lambda args: {},
+        body=lambda result: {"threads": result.get("threads", [])}),
+    Command.STACK_TRACE: DebugSpec(
+        child_cmd="stack_trace",
+        params=lambda args: {"thread_id": args.get("threadId", 0),
+                             "levels": args.get("levels", 20)},
+        body=lambda result: {"stackFrames": result.get("stack_frames", []),
+                             "totalFrames": result.get("total_frames", 0)}),
+}
+
+
+def step_debug(pstate: ProtoState, req: ParsedRequest) -> StepResult:
+    """S3 调试命令路由：查表造 ForwardRequest；表外命令照走状态门。"""
+    command = req.command
+    assert command is not None   # 窄化给检查器：unknown 在 parse 阶段拦下，step 永远收不到 None
+    spec = DEBUG_SPECS.get(command)
+    if spec is None:
+        # S3 来非调试命令（initialize/launch 等）：照走状态门
+        return StepResult(state=pstate,
+                          frames=(err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
+                                            "event not allowed in current state",
+                                            f"{req.raw_command} not allowed in {pstate.phase.name}"),))
+    #end if
+    return StepResult(state=pstate,
+                      action=ForwardRequest(req=req, cmd=spec.child_cmd,
+                                            params=spec.params(req.arguments)))
+#end def
+
+
+def settle_debug(pstate: ProtoState, req: ParsedRequest, result: dict) -> StepResult:
+    """调试命令成臂落靶：查表造 OkReply（键映射）。"""
+    command = req.command
+    assert command is not None   # 窄化给检查器：同 step_debug
+    spec = DEBUG_SPECS[command]  # 路由保证 command ∈ 表；miss=核 bug，KeyError 大声失败
+    return StepResult(state=pstate,
+                      frames=(OkReply(request=req, payload=spec.body(result)),))
+#end def
+
+
 # ---------- step：模式匹配分发（转移表逐行转录） ----------
 
 def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
@@ -236,11 +291,6 @@ def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
             return StepResult(state=pstate,
                               action=ForwardRequest(req=req, cmd="config_done", params={}))
 
-        case (StateEnum.S3, Command.THREADS):
-            # 调试命令代理首发：携动作自回环驻 S3，落靶归 resolve（子面同名 threads 空参）
-            return StepResult(state=pstate,
-                              action=ForwardRequest(req=req, cmd="threads", params={}))
-
         case (_, Command.DISCONNECT):
             # 断路器：任何状态无守卫直达终态（偏离#5）；清 slot=丢弃整个状态；
             # 帧序=响应先、terminated 后（2026-10-15 裁决 a：两门形状统一，对齐参考实测）
@@ -254,6 +304,10 @@ def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
                               frames=(err_reply(req, InternalErrCode.EVENT_NOT_ALLOWED,
                                                 "event not allowed in current state",
                                                 "launch_already_pending"),))
+
+        case (StateEnum.S3, _):
+            # S3 整层路由：调试命令的匹配与处理在 step_debug（与协议生命周期分离）
+            return step_debug(pstate, req)
 
         case _:
             # 状态门 + 占位态：该事件在当前状态不允许（偏离#1 状态门、#2 重入拒）
@@ -326,13 +380,9 @@ def resolve(pstate: ProtoState, action: Action, outcome: Outcome) -> StepResult:
                     return StepResult(state=pstate._replace(phase=StateEnum.S3, slot=None),
                                       frames=(OkReply(request=pending.request, payload={}),
                                               OkReply(request=req, payload={})))
-                case Command.THREADS:
-                    # body 映射对齐参考 server.py:487：取 threads 键重包，不透传杂键
-                    return StepResult(state=pstate,
-                                      frames=(OkReply(request=req,
-                                                      payload={"threads": result.get("threads", [])}),))
                 case _:
-                    raise AssertionError(f"unhandled proxied command {req.command}")
+                    # 调试命令成臂整层路由：落靶在 settle_debug（与 step_debug 对称）
+                    return settle_debug(pstate, req, result)
             #end match
         case (ForwardRequest(req), outcome):
             # 败臂按 DAP 命令分帧形：放行=双帧皆败（扣单+现单）；普通代理=单帧。码随物理事实。

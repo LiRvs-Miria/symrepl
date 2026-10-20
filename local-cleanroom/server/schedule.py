@@ -51,15 +51,23 @@ class ChildGoneError(RuntimeError):
         self.code = code
         self.message = message
     #end def
+    def __repr__(self) -> str:
+        # 默认 repr 只显构造参数（message），code 会隐身——detail 串与日志都靠 repr
+        return f"{type(self).__name__}(code={self.code!r}, message={self.message!r})"
+    #end def
 #end class
 
 
 class ChildRequestError(RuntimeError):
-    """应用级：child 明确应答 ok=False（参考 _ChildRequestError 同形 server.py:153-155）。"""
+    """应用级：child 明确拒单（ok=False 应答，携子面错误码）。"""
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+    #end def
+    def __repr__(self) -> str:
+        # 同 ChildGoneError：code 必须进 repr（子面错误分类学不许压扁成散文）
+        return f"{type(self).__name__}(code={self.code!r}, message={self.message!r})"
     #end def
 #end class
 

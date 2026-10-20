@@ -13,6 +13,8 @@ import sys
 
 from childproto import VERSION
 
+_phase = "entry"   # 桩内相位：launch→entry_stopped（静默），config_done→stopped；running 随 continue 砖再入册
+
 
 def read_frame(read, buf: bytes):
     """阻塞读一帧（Content-Length 线格式，规则权威=本地 framing.py）。返回 (dict|None, buf)。
@@ -47,6 +49,7 @@ def send(protocol_out, obj: dict) -> None:
 
 
 def handle(protocol_out, msg: dict) -> None:
+    global _phase
     cmd = msg.get("cmd")
     if cmd == "ping":
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
@@ -54,11 +57,13 @@ def handle(protocol_out, msg: dict) -> None:
     elif cmd == "launch":
         # 砖2：接单确认（真回放引擎未填，原地演化）。形状对齐参考 _cmd_launch（result.pid）。
         # pid=本进程真 pid（砖2 先验④代码先行裁）：探针钉形状不钉值。
+        _phase = "entry_stopped"          # 入口停静默相位（对齐参考 stopOnEntry=True 路）
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
                             "result": {"pid": os.getpid()}})
     elif cmd == "config_done":
         # 砖3：应答后吐 stopped 事件（模拟跑到入口即停；真引擎未填，原地演化）。
         # params 用执行面词法（thread_id/all_threads_stopped），翻 DAP 词法是父侧的活。
+        _phase = "stopped"
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True, "result": {}})
         send(protocol_out, {"type": "event", "event": "stopped",
                             "params": {"reason": "entry", "thread_id": 1,
@@ -67,6 +72,29 @@ def handle(protocol_out, msg: dict) -> None:
         # 横向首发：单线程契约的假数据（真 inferior 归引擎线），形状对齐参考 session.threads。
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
                             "result": {"threads": [{"id": 1, "name": "thread-1"}]}})
+    elif cmd == "stack_trace":
+        # 横向第二条：相位守卫+假帧单线程。守卫序照参考 service.session：类型哨→相位→线程存在。
+        thread_id = msg.get("params", {}).get("thread_id", 0)
+        if not isinstance(thread_id, int) or isinstance(thread_id, bool):
+            # bool 是 int 子类，isinstance(True, int)=True：必须显式排除
+            send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
+                                "error": {"code": "bad_request",
+                                          "message": "thread_id must be an integer"}})
+        elif _phase not in ("stopped", "entry_stopped"):
+            send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
+                                "error": {"code": "not_stopped",
+                                          "message": f"cannot read the stack in phase {_phase!r}"}})
+        elif thread_id != 1:
+            send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
+                                "error": {"code": "no_thread",
+                                          "message": f"no thread with id {thread_id}"}})
+        else:
+            send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
+                                "result": {"stack_frames": [{"id": 1000, "name": "main",
+                                                             "line": 4, "column": 5,
+                                                             "path": "get_sign.c"}],
+                                           "total_frames": 1}})
+        #end if
     else:
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
                             "error": {"code": "unknown_command",

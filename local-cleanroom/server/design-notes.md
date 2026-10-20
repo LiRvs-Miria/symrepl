@@ -308,3 +308,31 @@ FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
 **E3 落地（2026-10-19，实施驱动）**：原语件 `local-cleanroom/server/lldb_session.py`——`load_lldb`（plain import→`lldb -P` 定位）；**单进程单 debugger 升格为构造期契约**（第二个 Session=debugger_exists 大声拒绝；LLDB 22.1.8 宿主复用 Create 静默 no-op+失败后 Continue 永挂，不给复用机会）；`Session.launch`（KTEST_FILE 单变量最小环境+入口停+异步——环境不设变量时 kleeRuntest 运行时卡 stdin，故恒设）；`wait_state` 事件排空（非本 process/非进程/Running 过场全丢，撞 stopped/exited 才信）；`continue_/exit_code/close`。**新坑三枚（转录现形，入规格）**：①`SBFileSpec.GetPath()` 在 lldb 22 要缓冲区参数——argv 直接用 target 路径串（M1 基准同形）②本地 launch 硬依赖 **lldb-server** 且打包目录不进 PATH——`ensure_lldb_server()`：显式 env>lldb 同目录>/usr/lib/llvm-*/bin，设 LLDB_DEBUGSERVER_PATH（对齐 M1 driver:135-157 环境契约）③`WaitForEvent` SWIG 绑定收 uint32，float 直接 TypeError——入口取整。**oracle 网况**：probe_e3 三 ktest diff=0（直跑 0/1/255 vs E3 全程逐一吻合）；拓扑=一 Session 一进程（子进程模式，守门契约即真实部署拓扑）。**基线垫底**：靶子按 tests/conftest.py 配方即建（/tmp/opencode/replay-build/get_sign，与转移表 TG 同址），直跑最小环境三码互异先行钉住。**边界**：E3 只到"入口停→续跑→退出"；预扫描断点（E2 语义）与事件回流进会话编排（E4）未动。
 **E3 review 升格（同日，用户两钉）**：①环境变量出层——lldb_session 不做发现不改环境；`find_lldb_server(search_dirs)` 纯函数（目录序=入参）、"显式 env 优先"上移启动层、注入=启动参数 `debugserver_path`（launch 前单点赋值=LLDB 消费唯一通道）②纯核升家法代数——结果/错误当值返回不抛（`Drop(reason,detail)`/`Accept(state)`/`ServerFound`/`ServerNotFound`，家法对齐 FrameBad/BadChildMsg）、状态字母表 ADT（`KnownState` 四态+`UnknownState(raw)` 如实携值不假装）、壳路异常携 **error.py 新码族 SessionErrCode 3xxx**（构造期逼显式无默认）。**网炸二枚（迁移期）**：SessionError 类整只漏写（壳路 raise 无家可归）、probe 忘拆包把 ServerFound 整个塞给 str 参数——代数化后"结果当值"要求调用点显式分流，类型系统在场时这类错该由检查器兜（挂账）。**E4 接口已就位**：会话生命周期可按 (动作,事件)→SessionState 建模。
 **E3 review 第二轮（同日，用户钉：异常处理全面 _physical 化）**：`_physical` 升格为**缺省版** `(e, fallback)`——SessionError 已带码透传、TimeoutError→EVENT_TIMEOUT、末臂=调用点业务缺省码；五臂显式冗余归缺省（行为等价）。lldb_session 四非纯面全接：init→BAD_TARGET、launch→LAUNCH_FAILED、continue_→**RESUME_FAILED=3010 新员**、exit_code→NOT_EXITED；wait_state/close 不包（裸崩=bug 按家法炸穿；close 尽力而为）。**init 半路失败也立 _created 旗**——半初始化 debugger 进程内重试会踩复用 no-op 坑。schedule `child_request` 写路窄元组放宽 `except Exception`→ChildGoneError（写路一断=通道死，单一结局翻译一行）。**新盲区记档**：重复定义——新旧两个 _physical 并存、后者静默覆盖前者，六网全绿照不出来（新旧行为恰在 NO_LLDB 路等价），直测断言新签名当场逮住——定义级冲突是探针网盲区，纯核单测从此入常例。
+
+## 横向 stackTrace 契约（2026-10-20，守卫入门；用户两钉定稿，本节为转录稿）
+
+**守卫落位（用户钉）**：相位守卫住**子面**（域分层锚：父薄代理盲发；协议 S 门与子相位机是两根轴，父面不记子相位——不撞挂账「事件状态门」）。代价=桩长**最小相位机**：launch→`entry_stopped`（静默）→config_done→`stopped`（+吐 stopped 事件，既有行为不变），与参考 stopOnEntry=True 路同构。**验收范围（用户钉）**：`not_stopped` 负探针押后随 continue 砖——S3 内桩恒 stopped，本砖不可观测；本砖负路=thread 守卫。
+
+**工程分层裁决（2026-10-20，用户三钉定稿）**：**钉1 位置**——调试命令翻译层=适配器本职（实证三锚：pydevd `on_XXX_request` 派发+`NetCommandFactory` 造响应、官方 SDK `DebugSession.stackTraceRequest` 每命令一方法、codelldb `handle_stack_trace`；debugpy 拓扑与本 cleanroom 父子分层同构）。**钉2 形态（翻案史）**——AI 首案「每命令散函数 `proxy_*`/`settle_*`」废（case 与生命周期行混列，层界不可辨识）；二案「step_debug/settle_debug 每命令一 case」废（用户：同构命令该写一次）；**定案=表驱动收编**：`DebugSpec(child_cmd, params, body)` + `DEBUG_SPECS` 表（键=Command 成员），step_debug/settle_debug=通用执行器（查表造 ForwardRequest/OkReply，永不随命令再改）；S3 表外命令=step_debug 查表 miss→状态门 1003。**分离不住在枚举里**：单枚举保持协议词表宣言角色（match_command 一行一承诺），层界=表成员——枚举维护成本零增加。新调试命令=枚举成员+宣言行+一行表（+桩 handler+网）。反"两样本瞎猜"实证：参考父面 server.py:485-530 四命令（threads/stackTrace/scopes/variables）同构纯代理；唯一预告例外=`replay.branchTrace`（OQ-2：走 output 事件流非简单代理，横向收尾单独处理）。去程/回程两函数不可合一：中间隔子进程 I/O（核零 I/O 不变量）；败臂不经表（码随物理事实、话术随 raw_command，泛化单帧已足）。`req.command` 可空性按 parse_request 先例 assert 窄化给检查器（类型检查器接入仍挂账）。判据不变：表行只许词法翻译，引擎语义（相位守卫/世代票据/断点表）住子面。
+
+**参考线形状（规格来源，零代码继承）**：
+- 父面 server.py:491-515：参数**不校验**——映射盲发（`threadId→thread_id` 缺省 0、`levels` 缺省 20）；成→`body={"stackFrames": ←stack_frames, "totalFrames": ←total_frames}`（键映射，同 threads 杂键滤除思路）
+- 子面 service.py:370-380：`thread_id` 非 int（**含 bool：isinstance(True, int)=True 的坑，参考专门排除**）→`bad_request`；`levels` 坏值静默回 20（宽容，不拒）
+- 守卫 session.py:419-426：stack_trace 要求相位 ∈ {`stopped`, `entry_stopped`} 否则 `not_stopped`（OQ-2 相位守卫按命令分集合的首落地；threads 无守卫、scopes/continue 只收 stopped——后续砖的集合分歧从本砖的机制长出来）；线程不存在→`no_thread`；帧形状 `{id, name, line, column, path}`，id=世代*1000+index（世代票据归 scopes/variables 砖首撞，本桩钉形状不钉值）
+
+**核（adapter.py，预计壳零改动=横向复利第二证）**：
+- `Command.STACK_TRACE = "stackTrace"` + match_command 宣言行
+- `(S3, STACK_TRACE)` → 自回环驻 S3，携 `ForwardRequest(req, cmd="stack_trace", params={"thread_id": args.get("threadId", 0), "levels": args.get("levels", 20)})`——核定名+参数映射在核（子面词法在此定型，壳盲发）
+- resolve 成臂：`case Command.STACK_TRACE` → 单帧 `{"stackFrames": result.get("stack_frames", []), "totalFrames": result.get("total_frames", 0)}`
+- 败臂：既有泛化臂零改动（普通代理=单帧，码随物理事实、话术随 raw_command）
+- 其余状态→既有 fallback 状态门（1003+相位名）
+
+**桩（session.py）**：相位机两态（`entry_stopped`/`stopped`）；stack_trace handler=守卫三码（`not_stopped`/`bad_request`/`no_thread`）+假帧单线程（id=1000，即世代形状 0*1000+0；line/column/path 钉形状的假值）
+
+**网（probe_stacktrace.py，端口 5687）**：P1 S1 门 1003 / P2 成臂形状（stackFrames[].{id,name,line,column,path}+totalFrames int）/ P3 no_thread 负路（threadId=99→2002 既有 Rejected 链）/ P4 收场链照旧。RED 预期：**P1/P2/P3 FAIL、P4 绿（RED 3）**——命令未入 match_command 时 S1 门钉也过不了（parse 阶段 unknown command 1001 兜走，进不了状态机；threads 网 RED 2 同理含 S 门钉）。
+
+**不变量**：壳零改动；参数校验不在父面（参考对齐：父面缺省盲发，守卫全在子面）；错误码随物理事实（ChildRequestError→Rejected→2002 既有链不动）；桩相位机不得改 config_done 的既有可观测行为（stopped 事件形状原样，砖3 探针照绿）。
+
+**预埋攻击点**：①bool 漏判（isinstance(True,int)=True，参考专门排除，桩照抄该哨）②两套词法键名转录拼错（threadId/thread_id、stackFrames/stack_frames、levels 三对）③成臂 match 漏 case（unhandled AssertionError 兜底已在，忘加 case=当场炸）④桩相位机回归（config_done 路两个既有探针网必须原样绿）。
+
+**落地记录（2026-10-20 当日，AI 小步转录+用户逐步 review）**：步序=契约→RED 探针（**RED 3**：P1/P2/P3，命令未入 match_command 时 S1 门钉也过不了——parse 兜 1001，修正初稿 RED 2 误记）→核转录（P1 转绿，RED 2，`test_core.py` 新持久纯核直测网 5/5=E3 盲区裁决兑现）→分层翻案两轮（见工程分层裁决段）→桩转录（`_phase` 相位机 entry→entry_stopped→stopped，守卫序=类型哨(bool 排除)→相位→线程存在，假帧 id=1000=世代形状 0*1000+0，levels 坏值静默回 20 照参考）。**网炸一枚（真收获）**：P3 断言「'no_thread' 进 detail」实测扑空——detail=`ChildRequestError('no thread with id 99')`，**code 属性结构性在、repr 不显**（`__init__` 只交 message 给 super；默认 repr 只显构造参数），detail 串与 `effect_failed` 日志双场合丢子面错误分类学。修法=`ChildGoneError`/`ChildRequestError` 补 `__repr__`（code+message 都进 repr，单点修复两场合同时受益；同构同病顺手对称）。2002 链不动，probe 7/7 全绿。**网况**：probe_stacktrace 7/7+test_core 5/5+五旧网全绿（转移表/threads/launch/framing/childseam）。**not_stopped 负路**照契约押后（S3 内桩恒 stopped 不可观测），探针随 continue 砖补。**编辑纪律教训**：同形代码块（多个 `case _` 兜底臂）并发编辑 oldString 串位两刀（settle_debug 末臂、resolve 末臂各中一次），LSP+整读全文逮住单刀修复——同形块编辑必须带唯一锚点逐个落。
