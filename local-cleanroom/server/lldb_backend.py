@@ -293,13 +293,62 @@ class Session:
         #end try
     #end def
 
-    def continue_(self) -> None:
-        """放行 inferior（异步：返回即已续跑，状态走事件）。"""
+    def continue_(self) -> dict:
+        """放行 inferior（异步：返回即已续跑，完成以事件到达，response 不等它）。
+        spike 规则：非阻塞排空队列残事件再续（历史不当新闻）；决策 12：resume
+        使旧引用失效——世代推进+账本清空。"""
+        guard = require_phase(self._phase, ("stopped",),
+                              "continue", SessionErrCode.NOT_STOPPED)
+        if guard is not None:
+            raise guard
+        #end if
+        ev = self.lldb.SBEvent()
+        while self.listener.GetNextEvent(ev):
+            pass                                # spike 规则：残事件排空
+        #end while
+        self._generation += 1                   # 决策 12：resume 推进世代
+        self._var_refs.clear()
         try:
             self.process.Continue()
         except Exception as e:
             raise SessionError(_physical(e, SessionErrCode.RESUME_FAILED), repr(e)) from e
         #end try
+        self._phase = "running"
+        return {"all_threads_continued": True}
+    #end def
+
+    def poll_events(self) -> list[dict]:
+        """非阻塞事件泵（owner 轮询用）：GetNextEvent 不等，判定在 classify_event。
+        dead 短路：终态后不再产事件（防忙烧）。"""
+        if self._phase == "dead":
+            return []
+        #end if
+        events: list[dict] = []
+        ev = self.lldb.SBEvent()
+        while self.listener.GetNextEvent(ev):
+            verdict = classify_event(*self._read_event(ev),
+                                     self.process.GetProcessID())
+            match verdict:
+                case Drop():
+                    continue                    # 排空（判定在纯核）
+                case Accept(state=KnownState.STOPPED):
+                    self._phase = "stopped"
+                    thread = self.process.GetThreadAtIndex(0)
+                    events.append({"event": "stopped",
+                                   "params": {"reason": "exception",   # 推断裂归 setBreakpoints 砖
+                                              "thread_id": int(thread.GetThreadID()),
+                                              "all_threads_stopped": True}})
+                case Accept(state=KnownState.EXITED) | Accept(state=KnownState.CRASHED):
+                    code = int(self.process.GetExitStatus())
+                    self._phase = "dead"
+                    # 只发执行面事实 exited；terminated 的 DAP 惯例展开归父面翻译（单源）
+                    events.append({"event": "exited", "params": {"exit_code": code}})
+                    break                       # 终态：不再产事件
+                case _:
+                    pass                        # DETACHED/Unknown：留痕丢弃
+            #end match
+        #end while
+        return events
     #end def
 
     def threads(self) -> list[dict]:
@@ -413,8 +462,22 @@ class Session:
                 "all_threads_stopped": True}
     #end def
 
+    def _read_event(self, ev) -> tuple[bool, int | None, int]:
+        """SB 事件取数成 plain 值（wait_state/poll_events 共享）。"""
+        lldb = self.lldb
+        is_process = bool(lldb.SBProcess.EventIsProcessEvent(ev))
+        if is_process:
+            proc_id = lldb.SBProcess.GetProcessFromEvent(ev).GetProcessID()
+            state = int(lldb.SBProcess.GetStateFromEvent(ev))
+        else:
+            proc_id, state = None, 0
+        #end if
+        return is_process, proc_id, state
+    #end def
+
     def wait_state(self, timeout: float = 30.0) -> SessionState:
-        """事件排空等待：取数成 plain 值，判定在 classify_event（纯）。"""
+        """事件排空等待（阻塞版，launch 入口停专用）：取数成 plain 值，
+        判定在 classify_event（纯）。"""
         lldb = self.lldb
         ev = lldb.SBEvent()
         seconds = int(timeout)                # SWIG 绑定收 uint32，float 直接 TypeError
@@ -423,14 +486,7 @@ class Session:
                 raise SessionError(SessionErrCode.EVENT_TIMEOUT,
                                    "no process event in time")
             #end if
-            is_process = bool(lldb.SBProcess.EventIsProcessEvent(ev))
-            if is_process:
-                proc_id = lldb.SBProcess.GetProcessFromEvent(ev).GetProcessID()
-                state = int(lldb.SBProcess.GetStateFromEvent(ev))
-            else:
-                proc_id, state = None, 0
-            #end if
-            verdict = classify_event(is_process, proc_id, state,
+            verdict = classify_event(*self._read_event(ev),
                                      self.process.GetProcessID())
             match verdict:
                 case Drop():

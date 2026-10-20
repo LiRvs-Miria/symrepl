@@ -34,6 +34,7 @@ class Command(Enum):
     STACK_TRACE = "stackTrace"
     SCOPES = "scopes"
     VARIABLES = "variables"
+    CONTINUE = "continue"
 #end class
 
 def match_command(cmd: str) -> "Command | None":
@@ -48,6 +49,7 @@ def match_command(cmd: str) -> "Command | None":
         case "stackTrace":        return Command.STACK_TRACE
         case "scopes":            return Command.SCOPES
         case "variables":         return Command.VARIABLES
+        case "continue":          return Command.CONTINUE
         case _:                   return None
     #end match
 #end def
@@ -246,6 +248,10 @@ DEBUG_SPECS: dict[Command, DebugSpec] = {
                                             "type": v.get("type", ""),
                                             "variablesReference": v.get("variables_reference", 0)}
                                            for v in result.get("variables", [])]}),
+    Command.CONTINUE: DebugSpec(
+        child_cmd="continue",
+        params=lambda args: {},                      # 参考参数忽略（单线程全续）
+        body=lambda result: {"allThreadsContinued": result.get("all_threads_continued", True)}),
 }
 
 
@@ -431,9 +437,9 @@ def resolve(pstate: ProtoState, action: Action, outcome: Outcome) -> StepResult:
 
 # ---------- 子事件翻译（执行面词法 → DAP 词法；只翻不判：事件不改协议状态） ----------
 
-def translate_child_event(event: str, params: dict | None) -> Event | None:
-    """子事件 → DAP 事件；不认识的事件名=None（壳丢弃留痕）。
-    线形状对齐参考 server.py:769-781；exited/terminated 归砖4/砖5 的门。"""
+def translate_child_event(event: str, params: dict | None) -> tuple[Event, ...]:
+    """子事件 → DAP 事件（可能一变多：exited 携 terminated，DAP 惯例）；
+    不认识的事件名=()（壳丢弃留痕）。线形状对齐参考 server.py:769-793。"""
     params = params or {}
     if event == "stopped":
         body: dict = {"reason": params.get("reason", "exception"),
@@ -445,9 +451,17 @@ def translate_child_event(event: str, params: dict | None) -> Event | None:
         if params.get("breakpoint_ids"):
             body["hitBreakpointIds"] = params["breakpoint_ids"]
         #end if
-        return Event(event="stopped", body=body)
+        return (Event(event="stopped", body=body),)
     #end if
-    return None
+    if event == "exited":
+        # DAP 惯例：terminated 随 exited（参考 server.py:783-789 同款一变二）
+        return (Event(event="exited", body={"exitCode": params.get("exit_code", 0)}),
+                Event(event="terminated", body={}))
+    #end if
+    if event == "terminated":
+        return (Event(event="terminated", body={}),)
+    #end if
+    return ()
 #end def
 
 

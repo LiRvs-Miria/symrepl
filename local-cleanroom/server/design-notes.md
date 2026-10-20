@@ -395,4 +395,30 @@ FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
 
 **落地记录（2026-10-20 当日）**：RED 5（S1 门/成臂×2/stale×2）→步2 核转录（test_core 9/9，表驱动直测四行新增；S1 门转绿，RED 4=子面未接单）→步3 适配器+child。**网炸一枚**：child 把裸 list 直接当 wire result 上线，父面 body_fn 按键取——`AttributeError: 'list' object has no attribute 'get'` 炸穿父 handle 循环（DAP 连接 EOF）；修=child 侧**命令名键重包** `{"scopes": [...]}`/`{"variables": [...]}`（threads/stack_trace 同款家法），「键重包不裸交」从习惯升格为成文教训。**网况**：probe_scopes 11/11 ALL PASS（RED 5→0）+七网回归全绿。新命令成本账本第三次兑现：成员+宣言两行+表两行+Protocol 两签名+child 两哨两重包+原语两件——**核侧 step/resolve 仍字节未动**。守卫单集（scopes/variables 只收 stopped）与 stackTrace 双集并立=OQ-2 分集合首分叉落地；stale 负路经 ChildRequestError(__repr__)→2002 detail 携码。
 
-**预埋攻击点**：①`close()`（Destroy+Terminate）是否真杀 stopped-at-entry 的 inferior——**已实证了结**：真饵冒烟孤儿双无，process.Kill() 不需补；原忧「只拆 debugger 不杀进程」不成立 ②世代初值 0→帧 id 0 起（桩的 1000 退役；探针钉形状不钉值故无碍）③真 threadId 大整数进 stopped 事件与 threads（translate 不改值，形状闸全绿）④真 launch 1-3s vs 父 10s/网 15s 窗口（慢机）⑤child 侧类型哨与父侧缺省映射的分工（父盲发 thread_id=0 缺省——0 必 no_thread，负路天然可观测）⑥**（1R 已炸已修）空命名空间包顶掉 plain import**——`/usr/lib/python3/dist-packages/lldb` 零成员壳，import 成功≠可用：`_import_lldb` import 后验签 `eStateStopped`、缺=走 `lldb -P` 备援、空壳占 sys.modules 槽先踢再重导（10-19 时 plain import 尚不通，环境漂移使壳包现形——E3 坑清单「plain import 不通」的续集）。
+## continue 契约（2026-10-20，横向与 E4 续刀合流点；用户两钉：泵架构参考同构+父面翻译扩入本砖；转录稿）
+
+**范围（用户钉）**：①continue 代理+响应（轻件照表驱动旧例）；②**子进程事件泵**（参考同构：reader 线程+owner 轮询循环——参考 spike-verified 形状，owner-thread 契约天然保持：reader 只读 stdin 永不碰 SB，owner 单写者）；③世代推进（决策 12：resume 使引用失效——stale 首次真实可达）；④**exited/terminated 父面翻译扩入本砖**（用户裁扩大：DAP 生命周期全通；output 事件仍留后续）。**有意偏离带因**：参考 `_MAX_RESUMES` 安全阀（M1 一次性回放防病理循环）不随迁——M2 交互式由客户端节奏驱动，病理循环不可达，valve 反成不可观测自杀路。
+
+**参考线形状（规格来源，零代码继承）**：
+- 父面 server.py:621-630：continue **参数忽略**空参盲发；成臂 body=常量 `{"allThreadsContinued": True}`——我们改**单源映射**（child 回 all_threads_continued，body_fn r.get 缺省 True；细节自裁入档）
+- 子会话 session.py:330-336+377-399：守卫 stopped→_resume：**spike 规则**（非阻塞排空队列残事件，历史不当新闻）→**世代推进**（generation+=1、var_refs.clear()）→`process.Continue()`（异步立即回）→phase="running"；完成以事件到达，response 不等它
+- exited/terminated：session poll（:619-629）exited→exit_code 捕获→phase="dead"→`[exited{exit_code}, terminated{}]` 双事件；父面 translate（:769-793）**一变二**：exited→`exited{exitCode}+terminated{}`（DAP 惯例：terminated 随 exited）+terminated→terminated{}；stopped→stopped 既有
+
+**核（adapter.py，表驱动一行）**：`Command.CONTINUE="continue"`+宣言行；DEBUG_SPECS 行：params={}（参考参数忽略）、body=r.get("all_threads_continued", True)→`{"allThreadsContinued": …}`（单源在适配器）
+
+**适配器（lldb_backend 增员）**：
+- `continue_() -> dict`：require_phase(("stopped",)，NOT_STOPPED)→非阻塞排空残事件（spike 规则，GetNextEvent 循环）→generation+=1→_var_refs.clear()→process.Continue()→phase="running"→回 `{"all_threads_continued": True}`
+- `poll_events() -> list[dict]`：非阻塞 GetNextEvent 循环（classify_event 复用；抽 `_read_event` 助手与 wait_state 共享取数）；STOPPED→phase="stopped"+stopped 事件 params（reason 缺省 "exception"——推断裂归 setBreakpoints 砖）；EXITED→exit_code 捕获→phase="dead"+`[exited{exit_code}, terminated{}]`；CRASHED 同 exited 形（exit_code 取 GetExitStatus 语义值）；DETACHED/Unknown→留痕丢弃
+- wait_state 阻塞版保留（launch 入口停专用）
+
+**child（session.py，参考同构）**：reader 线程（read_frame 循环→队列；半帧 buf 活在 reader 内；坏帧=fatal、EOF=eof）+owner 轮询循环（每轮：后端在→`poll_events()` 先发事件帧→`queue.get(timeout)`→handle）；单写者不变（仅 owner send）；退出码语义不变（eof→0/fatal→3）；hygiene 先于 reader 启动
+
+**父面 translate_child_event**：返回类型 `Event | None` → `tuple[Event, ...]`（exited 一变二）；schedule.forward_event 拆包接线随之
+
+**网（probe_continue.py，端口 5691）**：P1 S1 门 1003 / P2 全链→continue→resp success+allThreadsContinued True / P3 continue 后 stackTrace→2002 携 not_stopped（running/dead 相位皆可，不钉相位名——get_sign 秒退）/ P4 再 continue→2002 not_stopped（自身守卫）/ P5 旧帧 id 负路→2002 携 not_stopped（**勘误（RED 后实测）**：参考守卫序=相位先于世代解码，continue 后 inferior 秒退即 dead，not_stopped 先答——stale_reference 待 setBreakpoints 砖产出第二次停相后真实触发，pins 随砖迁移）/ P6 exited/terminated 事件链：exited{exitCode int} 先+terminated{} 随（宽容收齐，exited 先于 terminated 钉死；**child 只发执行面事实 exited，terminated 展开归父面一变二——单源**）/ P7 收场链（disconnect 对 dead inferior 拆除）+孤儿。RED 预期：P1-P6 FAIL（unknown 1001/事件不来），P7 绿。test_core：CONTINUE 出站映射+成臂映射直测两行。
+
+**不变量**：协议状态 S3 全程不因 running/dead 改变（「事件不改协议状态」裁定继续成立）；响应不越其引发的事件（child 单写者顺序天然保）；断路器 disconnect 对 dead inferior 拆除安全（close 尽力而为既有）。
+
+**预埋攻击点**：①reader 启动先于 hygiene=杂音污染 fd1（顺序钉死：hygiene→reader）②半帧 buf 跨线程共享（buf 活在 reader 内，队列只传完整 msg）③exited 一变二——translate 返回类型变更、forward_event 拆包忘改④exited 与 continue 响应竞争（秒退），探针宽容序收帧⑤close 对已 dead inferior 的幂等性（若炸当场见）⑥poll_events 在 phase dead 后持续空转（须终态短路防忙烧）。
+
+**落地记录（2026-10-20 当日）**：RED 6→步2 核转录（表一行；P1 转绿，test_core 11/11）→步3 四件套（适配器 continue_/poll_events+_read_event 取数助手重构、child reader 线程+owner 轮询循环、父面 translate 一变二、直测两行）。**网炸两枚**：①**端口面漏接单**——原语/泵/翻译全建而 handle 无 continue 分支（子面答 "unknown command 'continue'"，全件建成却忘了门牌）；②**terminated 双发**——child 按参考形状发 [exited, terminated] 对，父面一变二再展开=客户端三帧（terminated×2），帧序错位连锁误判三钉；修=**单源裁决**：child 只发执行面事实 exited，DAP 惯例展开（terminated 随 exited）归父面翻译。**契约勘误一枚**：P5 stale_reference 预测被守卫序推翻——参考相位先于世代解码，continue 后 inferior 秒退即 dead，not_stopped 先答；stale 真实触发待 setBreakpoints 砖产出第二次停相（pins 随砖迁移）。**网况**：probe_continue 12/12 ALL PASS+八网回归全绿。**真化里程碑**：DAP 生命周期首次全程可观测（launch→入口停→continue→exited+terminated）；响应不越其引发的事件由 child 单写者顺序天然保证（exited 先于 terminated 同源保序）。

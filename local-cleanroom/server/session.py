@@ -11,7 +11,9 @@ import argparse
 import contextlib
 import json
 import os
+import queue
 import sys
+import threading
 from typing import Protocol
 
 from childproto import VERSION
@@ -155,6 +157,8 @@ def handle(protocol_out, msg: dict) -> None:
         _scopes(protocol_out, msg)
     elif cmd == "variables":
         _variables(protocol_out, msg)
+    elif cmd == "continue":
+        _run(protocol_out, msg, lambda: _backend_ready().continue_())
     else:
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
                             "error": {"code": "unknown_command",
@@ -245,6 +249,26 @@ def _shutdown_backend() -> None:
 #end def
 
 
+def _reader(stdin_read, q: queue.Queue) -> None:
+    """reader 线程（参考同构）：只读 stdin 入队，永不碰 SB/协议写路。
+    半帧 buf 活在本线程内，队列只传完整 msg；坏帧=fatal、EOF=eof。"""
+    buf = b""
+    while True:
+        try:
+            msg, buf = read_frame(stdin_read, buf)
+        except Exception:
+            q.put(("fatal", None))            # 坏帧 no-resync
+            return
+        #end try
+        if msg is None:
+            q.put(("eof", None))              # 父死信号
+            return
+        #end if
+        q.put(("message", msg))
+    #end while
+#end def
+
+
 def main() -> int:
     global _backend_name, _lldb_dir
     parser = argparse.ArgumentParser(prog="session")
@@ -259,18 +283,28 @@ def main() -> int:
     protocol_out = sys.stdout.buffer          # hygiene 同真 service（:401-406）：先抓 fd1 再改道
     stdin_read = sys.stdin.buffer.read1       # type: ignore[attr-defined]  # 运行时是 BufferedReader（真 service :109 同款）
     with open(args.log, "a", buffering=1, errors="replace") as logf:
-        sys.stdout, sys.stderr = logf, logf   # 杂音归日志，协议通道独占 fd1
-        buf = b""
+        sys.stdout, sys.stderr = logf, logf   # 杂音归日志（hygiene 先于 reader 启动，攻击点①）
+        q = queue.Queue()
+        threading.Thread(target=_reader, args=(stdin_read, q),
+                         name="session-reader", daemon=True).start()
         while True:
+            if _backend is not None:
+                for ev in _backend.poll_events():   # 事件先发：响应不越其引发的事件
+                    send(protocol_out, {"type": "event", **ev})
+                #end for
+            #end if
             try:
-                msg, buf = read_frame(stdin_read, buf)
-            except Exception:
-                _shutdown_backend()
-                return 3                      # 坏帧 no-resync（对齐真 service :40-43）
+                kind, msg = q.get(timeout=0.05)
+            except queue.Empty:
+                continue                      # 无命令：回泵事件
             #end try
-            if msg is None:
+            if kind == "eof":
                 _shutdown_backend()
                 return 0                      # stdin-EOF：父死信号 → 干净自杀（:38-39）
+            #end if
+            if kind == "fatal":
+                _shutdown_backend()
+                return 3                      # 坏帧 no-resync（对齐真 service :40-43）
             #end if
             handle(protocol_out, msg)
         #end while

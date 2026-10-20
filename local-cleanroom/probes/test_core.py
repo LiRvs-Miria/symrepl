@@ -104,6 +104,22 @@ ok = (len(frames) == 1 and frames[0]["success"] is True
                                                "type": "int", "variablesReference": 0}]})
 check("resolve: variables 成臂（variablesReference 键映射）", ok)
 
+# step（表驱动）：continue 出站映射（空参，参考参数忽略）
+r = req_of("continue")
+res = step(ProtoState(phase=StateEnum.S3), r)
+ok = (res.state.phase == StateEnum.S3 and isinstance(res.action, ForwardRequest)
+      and res.action.cmd == "continue" and res.action.params == {})
+check("step: continue 出站映射（空参）", ok)
+
+# resolve 成臂（表驱动）：continue 单源映射
+r = req_of("continue")
+action = ForwardRequest(req=r, cmd="continue", params={})
+res = resolve(ProtoState(phase=StateEnum.S3), action, Done({"all_threads_continued": True}))
+frames, _ = build_replies(res.frames, 1)
+ok = (len(frames) == 1 and frames[0]["success"] is True
+      and frames[0]["body"] == {"allThreadsContinued": True})
+check("resolve: continue 成臂（allThreadsContinued 单源映射）", ok)
+
 
 if __name__ == "__main__":
     print("=" * 30)

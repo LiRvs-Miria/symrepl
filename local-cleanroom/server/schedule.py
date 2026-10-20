@@ -247,15 +247,15 @@ def _physical(e: Exception) -> Outcome:
 
 
 async def forward_event(conn: "ConnState", ev: ChildEvent) -> None:
-    """事件回流：核翻译（只翻不判）→ 领 seq（D3：无请求事件吃账本）→ 写客户端。
+    """事件回流：核翻译（一变多，exited 携 terminated）→ 领 seq（D3：无请求事件吃账本）→ 写客户端。
     领号到回写不跨 await=原子；写完整帧=帧原子，与 handle 路的帧序竞争不钉（探针已宽容）。
     客户端已走/写崩：事件无处投递即丢弃——异常沿 reader 路走，砖4/砖5 再裁边界。"""
-    event = translate_child_event(ev.event, ev.params)
-    if event is None:
+    events = translate_child_event(ev.event, ev.params)
+    if not events:
         log(f"child_event_dropped event={ev.event}")
         return
     #end if
-    frames, conn.seq = build_replies((event,), conn.seq)
+    frames, conn.seq = build_replies(events, conn.seq)
     writer = conn.active_writer
     if writer is None:
         log("child_event_dropped reason=no_client")
