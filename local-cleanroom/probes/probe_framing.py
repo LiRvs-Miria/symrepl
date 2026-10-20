@@ -6,17 +6,18 @@
 实现前预期：R-F1/R-F3 不自退场（超时 FAIL）、R-F2/R-F4 原因名不符 FAIL、R-F5 绿（FIN 现状即对）。
 回归门：probe_transition_table 14 原样全过（probe_shutdown 8 已随 shutdown 退役删除，2026-10-16）。
 """
-import subprocess, sys, socket, time
+import subprocess, sys, socket, time, os, shutil
 from pathlib import Path
 
 SRV_DIR = str(Path(__file__).resolve().parent.parent / "server")
 PORT = 5692
+LLDB_DIR = os.path.dirname(os.path.realpath(shutil.which("lldb")))   # 操作方侧解析一次（framing 不 launch，后端不构造）
 fails = []
 
 def start(port=PORT):
     subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True)  # 自洁
     time.sleep(0.2)
-    p = subprocess.Popen(["python3", "schedule.py", str(port)], cwd=SRV_DIR,
+    p = subprocess.Popen(["python3", "schedule.py", str(port), "--lldb-dir", LLDB_DIR], cwd=SRV_DIR,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     for _ in range(50):
         r = subprocess.run(["ss", "-tln"], capture_output=True, text=True)

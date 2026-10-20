@@ -13,6 +13,7 @@ child=本地桩 ../server/service.py（2026-10-16 桩案：形状忠实真协议
 """
 import asyncio
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -21,7 +22,10 @@ from pathlib import Path
 SRV_DIR = str(Path(__file__).resolve().parent.parent / "server")
 sys.path.insert(0, SRV_DIR)
 
-CHILD = [sys.executable, str(Path(SRV_DIR) / "session.py")]
+# session.py 端口面参数化（2026-10-20）：--lldb-dir required；缝测不构造后端，
+# 目录照实给真值（操作方侧解析），ping/EOF 路零后端依赖不变。
+_LLB_DIR = os.path.dirname(os.path.realpath(shutil.which("lldb")))
+CHILD = [sys.executable, str(Path(SRV_DIR) / "session.py"), "--lldb-dir", _LLB_DIR]
 
 results = []
 

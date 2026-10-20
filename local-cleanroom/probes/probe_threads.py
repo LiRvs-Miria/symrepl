@@ -7,19 +7,22 @@
 - 收场链照旧：disconnect→[resp, terminated]→exit0
 桩回假线程（真 inferior 归引擎线）；pid/线程值钉形状不钉值。
 """
-import socket, subprocess, time, sys
+import socket, subprocess, time, sys, os, shutil
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "client"))
 import dap_client as dc
 
 SRV_DIR = str(Path(__file__).resolve().parent.parent / "server")
 PORT = 5685
+KT = str(Path(__file__).resolve().parent.parent.parent / "third_party/klee/ktest/get_sign_test000003.ktest")
+TG = "/tmp/opencode/replay-build/get_sign"
+LLDB_DIR = os.path.dirname(os.path.realpath(shutil.which("lldb")))   # 操作方侧解析一次，服务零猜测
 fails = []
 
 def start(port=PORT):
     subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True)  # 自洁
     time.sleep(0.2)
-    p = subprocess.Popen(["python3", "schedule.py", str(port)], cwd=SRV_DIR,
+    p = subprocess.Popen(["python3", "schedule.py", str(port), "--lldb-dir", LLDB_DIR], cwd=SRV_DIR,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     for _ in range(50):              # 只查监听不碰会话（单会话拓扑：试连=自杀）
         r = subprocess.run(["ss", "-tln"], capture_output=True, text=True)
@@ -40,13 +43,21 @@ def check(name, cond):
 #end def
 
 def recv_or_fail(s, buf, tag):
+    """收一帧；超时=没等到。窗口 15s：真 LLDB launch 1-3s。"""
     try:
-        s.settimeout(5)
+        s.settimeout(15)
         return dc.recv(s, buf)
     except socket.timeout:
         print(f"  <- ({tag} 超时未达)")
         return None, buf
     #end try
+#end def
+
+def no_orphans():
+    """收场断言：真 inferior 与 lldb-server 不得残留（close 路契约）。"""
+    return all(not subprocess.run(["pgrep", "-x", n], capture_output=True,
+                                  text=True).stdout.strip()
+               for n in ("get_sign", "lldb-server"))
 #end def
 
 def is_event(m, name):
@@ -77,7 +88,7 @@ def threads_chain():
         check(name + ": S1 threads 被状态门拒（1003）", ok)
 
         # 到 S3：launch → 两事件；configDone → 三帧收齐（双帧+stopped，宽容序）
-        dc.send(s, seq, "launch", {"ktest": "k", "target": "t"})
+        dc.send(s, seq, "launch", {"ktest": KT, "target": TG})
         e1, buf = recv_or_fail(s, buf, "process 事件")
         e2, buf = recv_or_fail(s, buf, "initialized 事件")
         check(name + ": launch 两事件就位", is_event(e1, "process") and is_event(e2, "initialized"))
@@ -116,6 +127,7 @@ def threads_chain():
         s.close()
         code = p.wait(timeout=10)
         check(name + ": 会话毕 exit=0", code == 0)
+        check(name + ": 无孤儿 inferior/lldb-server", no_orphans())
     finally:
         if p.poll() is None:
             p.terminate(); p.wait(timeout=5)

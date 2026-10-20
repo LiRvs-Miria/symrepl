@@ -7,21 +7,25 @@
   "totalFrames": int}（键映射：子面 stack_frames/total_frames）
 - 负路：threadId 不存在 → 2002（子面 no_thread 经 Rejected 败臂，detail 携 no_thread）
 - 收场链照旧：disconnect→[resp, terminated]→exit0
-桩回假帧单线程（真栈帧归引擎线）；not_stopped 负路 S3 内不可观测，押后随 continue 砖。
+E4 真化（2026-10-20）：真饵 KT/TG+真线程 id 两步走（threads→stackTrace）+孤儿断言；
+not_stopped 负路 S3 内不可观测，押后随 continue 砖。
 """
-import socket, subprocess, time, sys
+import socket, subprocess, time, sys, os, shutil
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "client"))
 import dap_client as dc
 
 SRV_DIR = str(Path(__file__).resolve().parent.parent / "server")
 PORT = 5687
+KT = str(Path(__file__).resolve().parent.parent.parent / "third_party/klee/ktest/get_sign_test000003.ktest")
+TG = "/tmp/opencode/replay-build/get_sign"
+LLDB_DIR = os.path.dirname(os.path.realpath(shutil.which("lldb")))   # 操作方侧解析一次，服务零猜测
 fails = []
 
 def start(port=PORT):
     subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True)  # 自洁
     time.sleep(0.2)
-    p = subprocess.Popen(["python3", "schedule.py", str(port)], cwd=SRV_DIR,
+    p = subprocess.Popen(["python3", "schedule.py", str(port), "--lldb-dir", LLDB_DIR], cwd=SRV_DIR,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     for _ in range(50):              # 只查监听不碰会话（单会话拓扑：试连=自杀）
         r = subprocess.run(["ss", "-tln"], capture_output=True, text=True)
@@ -42,13 +46,21 @@ def check(name, cond):
 #end def
 
 def recv_or_fail(s, buf, tag):
+    """收一帧；超时=没等到。窗口 15s：真 LLDB launch 1-3s。"""
     try:
-        s.settimeout(5)
+        s.settimeout(15)
         return dc.recv(s, buf)
     except socket.timeout:
         print(f"  <- ({tag} 超时未达)")
         return None, buf
     #end try
+#end def
+
+def no_orphans():
+    """收场断言：真 inferior 与 lldb-server 不得残留（close 路契约）。"""
+    return all(not subprocess.run(["pgrep", "-x", n], capture_output=True,
+                                  text=True).stdout.strip()
+               for n in ("get_sign", "lldb-server"))
 #end def
 
 def is_event(m, name):
@@ -79,7 +91,7 @@ def stacktrace_chain():
         check(name + ": S1 stackTrace 被状态门拒（1003）", ok)
 
         # 到 S3：launch → 两事件；configDone → 三帧收齐（双帧+stopped，宽容序）
-        dc.send(s, seq, "launch", {"ktest": "k", "target": "t"})
+        dc.send(s, seq, "launch", {"ktest": KT, "target": TG})
         e1, buf = recv_or_fail(s, buf, "process 事件")
         e2, buf = recv_or_fail(s, buf, "initialized 事件")
         check(name + ": launch 两事件就位", is_event(e1, "process") and is_event(e2, "initialized"))
@@ -95,8 +107,13 @@ def stacktrace_chain():
               sum(1 for f in got if f.get("type") == "response") == 2
               and any(is_event(f, "stopped") for f in got))
 
-        # S3 来 stackTrace → 成臂键映射形状
-        dc.send(s, seq, "stackTrace", {"threadId": 1})
+        # S3 两步走：threads 取真 id（真线程 id=OS tid，桩时代假 1 已退役）→ stackTrace
+        dc.send(s, seq, "threads")
+        tr, buf = recv_or_fail(s, buf, "threads 取真 id")
+        tid = ((tr.get("body") or {}).get("threads") or [{}])[0].get("id") if tr is not None else None
+        check(name + ": threads 取真 id（int）", isinstance(tid, int))
+
+        dc.send(s, seq, "stackTrace", {"threadId": tid})
         r, buf = recv_or_fail(s, buf, "S3 stackTrace 响应")
         body = (r.get("body") or {}) if r is not None else {}
         frames = body.get("stackFrames")
@@ -129,6 +146,7 @@ def stacktrace_chain():
         s.close()
         code = p.wait(timeout=10)
         check(name + ": 会话毕 exit=0", code == 0)
+        check(name + ": 无孤儿 inferior/lldb-server", no_orphans())
     finally:
         if p.poll() is None:
             p.terminate(); p.wait(timeout=5)

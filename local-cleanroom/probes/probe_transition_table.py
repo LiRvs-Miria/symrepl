@@ -1,4 +1,4 @@
-import socket, json, subprocess, time, signal, sys
+import socket, json, subprocess, time, signal, sys, os, shutil
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "client"))
 import dap_client as dc
@@ -6,12 +6,13 @@ import dap_client as dc
 SRV_DIR = str(Path(__file__).resolve().parent.parent / "server")
 KT = str(Path(__file__).resolve().parent.parent.parent / "third_party/klee/ktest/get_sign_test000003.ktest")
 TG = "/tmp/opencode/replay-build/get_sign"
+LLDB_DIR = os.path.dirname(os.path.realpath(shutil.which("lldb")))   # 操作方侧解析一次，服务零猜测
 fails = []
 
 def start(port=5681):
     subprocess.run(["fuser","-k",f"{port}/tcp"], capture_output=True)  # 自洁：前轮泄漏僵尸会毒害本轮
     time.sleep(0.2)
-    p = subprocess.Popen(["python3","schedule.py",str(port)], cwd=SRV_DIR,
+    p = subprocess.Popen(["python3","schedule.py",str(port),"--lldb-dir",LLDB_DIR], cwd=SRV_DIR,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     for _ in range(50):              # 就绪等待：只查监听不碰会话（单会话拓扑下试探连接=自杀）
         r = subprocess.run(["ss", "-tln"], capture_output=True, text=True)
@@ -25,7 +26,7 @@ def start(port=5681):
 #end def
 
 def session(port=5681):
-    s, buf = dc.connect("127.0.0.1", port); s.settimeout(3)
+    s, buf = dc.connect("127.0.0.1", port); s.settimeout(10)   # 真 LLDB launch 1-3s，窗口放宽
     return s, buf, __import__("itertools").count(1)
 
 def one(seq_msg):  # 发一帧收一帧
