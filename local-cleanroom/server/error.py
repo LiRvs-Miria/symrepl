@@ -36,6 +36,8 @@ class SessionErrCode(IntEnum):
     NOT_LAUNCHED = 3012        # 相位守卫：该操作要求 entry_stopped
     NO_THREAD = 3013           # 线程号不存在（GetThreadByID 无效）
     ALREADY_LAUNCHED = 3014    # 相位守卫：该操作要求 launch 前（参考 already_launched 同款）
+    STALE_REFERENCE = 3015     # 世代票据失效（frame id/ref 世代≠当前，continue 时推进）
+    NO_FRAME = 3016            # 帧号不存在（越界）
 #end class
 
 class SessionError(RuntimeError):

@@ -234,6 +234,8 @@ class Session:
             self.target_path = target
             self._phase = "entry"               # entry → entry_stopped → stopped（running/dead 随 continue 砖）
             self._generation = 0                # 世代票据（decision 12）：frame id=generation*1000+index
+            self._var_refs = {}                 # 变量引用账本（适配器私有）：ref→(generation, frame_index)
+            self._ref_counter = 0               # 引用计数器：ref=generation*100000+counter（第二 id 空间）
         except Exception as e:
             _created = True                     # 半初始化的 debugger 也是坑：进程内不许重试
             raise SessionError(_physical(e, SessionErrCode.BAD_TARGET), repr(e)) from e
@@ -342,6 +344,59 @@ class Session:
                            "line": line, "column": column, "path": path})
         #end for
         return {"stack_frames": frames, "total_frames": total}
+    #end def
+
+    def scopes(self, frame_id: int) -> list[dict]:
+        """帧的作用域引用（守卫单集 stopped，照参考；OQ-2 分集合首分叉）。
+        解码世代→验帧→发引用并登记账本；SB 取数不包（家法）。"""
+        guard = require_phase(self._phase, ("stopped",),
+                              "read scopes", SessionErrCode.NOT_STOPPED)
+        if guard is not None:
+            raise guard
+        #end if
+        generation, frame_index = divmod(int(frame_id), 1000)
+        if generation != self._generation:
+            raise SessionError(SessionErrCode.STALE_REFERENCE,
+                               f"frame id from generation {generation}, "
+                               f"current generation is {self._generation}")
+        #end if
+        thread = self.process.GetThreadAtIndex(0)
+        if frame_index >= thread.GetNumFrames():
+            raise SessionError(SessionErrCode.NO_FRAME, f"no frame {frame_index}")
+        #end if
+        self._ref_counter += 1
+        ref = generation * 100000 + self._ref_counter
+        self._var_refs[ref] = (generation, frame_index)
+        return [{"name": "Locals", "variables_reference": ref}]
+    #end def
+
+    def variables(self, ref: int) -> list[dict]:
+        """引用背后的变量（平铺无子）。解引用验世代；SB 取数不包（家法）。"""
+        guard = require_phase(self._phase, ("stopped",),
+                              "read variables", SessionErrCode.NOT_STOPPED)
+        if guard is not None:
+            raise guard
+        #end if
+        entry = self._var_refs.get(int(ref))
+        if entry is None or entry[0] != self._generation:
+            raise SessionError(SessionErrCode.STALE_REFERENCE,
+                               f"variables reference {ref} is not from the current stop")
+        #end if
+        _, frame_index = entry
+        thread = self.process.GetThreadAtIndex(0)
+        frame = thread.GetFrameAtIndex(frame_index)
+        variables = []
+        for value in frame.GetVariables(True, True, False, True):
+            variables.append(
+                {
+                    "name": value.GetName() or "<unnamed>",
+                    "value": value.GetValue() or value.GetSummary() or "",
+                    "type": value.GetTypeName() or "",
+                    "variables_reference": 0,  # 平铺：无子引用
+                }
+            )
+        #end for
+        return variables
     #end def
 
     def report_entry_stop(self) -> dict:

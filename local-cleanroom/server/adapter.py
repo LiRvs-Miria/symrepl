@@ -32,6 +32,8 @@ class Command(Enum):
     DISCONNECT = "disconnect"
     THREADS = "threads"
     STACK_TRACE = "stackTrace"
+    SCOPES = "scopes"
+    VARIABLES = "variables"
 #end class
 
 def match_command(cmd: str) -> "Command | None":
@@ -44,6 +46,8 @@ def match_command(cmd: str) -> "Command | None":
         case "disconnect":        return Command.DISCONNECT
         case "threads":           return Command.THREADS
         case "stackTrace":        return Command.STACK_TRACE
+        case "scopes":            return Command.SCOPES
+        case "variables":         return Command.VARIABLES
         case _:                   return None
     #end match
 #end def
@@ -227,6 +231,21 @@ DEBUG_SPECS: dict[Command, DebugSpec] = {
                              "levels": args.get("levels", 20)},
         body=lambda result: {"stackFrames": result.get("stack_frames", []),
                              "totalFrames": result.get("total_frames", 0)}),
+    Command.SCOPES: DebugSpec(
+        child_cmd="scopes",
+        params=lambda args: {"frame_id": args.get("frameId", 0)},
+        body=lambda result: {"scopes": [{"name": x["name"],
+                                         "variablesReference": x["variables_reference"],
+                                         "expensive": False}
+                                        for x in result.get("scopes", [])]}),
+    Command.VARIABLES: DebugSpec(
+        child_cmd="variables",
+        params=lambda args: {"variables_reference": args.get("variablesReference", 0)},
+        body=lambda result: {"variables": [{"name": v["name"],
+                                            "value": v["value"],
+                                            "type": v.get("type", ""),
+                                            "variablesReference": v.get("variables_reference", 0)}
+                                           for v in result.get("variables", [])]}),
 }
 
 

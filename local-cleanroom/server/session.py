@@ -47,6 +47,16 @@ class DebugBackend(Protocol):
         ...
     #end def
 
+    def scopes(self, frame_id: int) -> list[dict]:
+        """帧作用域引用（发 variablesReference，账本归适配器私有）。"""
+        ...
+    #end def
+
+    def variables(self, ref: int) -> list[dict]:
+        """引用背后的变量（平铺无子）。"""
+        ...
+    #end def
+
     def close(self) -> None:
         """收场拆除（inferior 随后端语义处置）。"""
         ...
@@ -141,6 +151,10 @@ def handle(protocol_out, msg: dict) -> None:
         _run(protocol_out, msg, lambda: {"threads": _backend_ready().threads()})
     elif cmd == "stack_trace":
         _stack_trace(protocol_out, msg)
+    elif cmd == "scopes":
+        _scopes(protocol_out, msg)
+    elif cmd == "variables":
+        _variables(protocol_out, msg)
     else:
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
                             "error": {"code": "unknown_command",
@@ -189,6 +203,33 @@ def _stack_trace(protocol_out, msg: dict) -> None:
         levels = 20                            # 坏值静默缺省（参考同款宽容）
     #end if
     _run(protocol_out, msg, lambda: _backend_ready().stack_trace(thread_id, levels))
+#end def
+
+
+def _scopes(protocol_out, msg: dict) -> None:
+    params = msg.get("params") or {}
+    frame_id = params.get("frame_id", 0)
+    if not isinstance(frame_id, int) or isinstance(frame_id, bool) or frame_id < 0:
+        # 负值归类型域（参考 decode 同款 bad_request）；世代校验归适配器
+        _reply_err(protocol_out, msg, "bad_request",
+                   "frameId must be a non-negative integer")
+        return
+    #end if
+    _run(protocol_out, msg,
+         lambda: {"scopes": _backend_ready().scopes(frame_id)})   # 命令名键重包（父面按键取）
+#end def
+
+
+def _variables(protocol_out, msg: dict) -> None:
+    params = msg.get("params") or {}
+    ref = params.get("variables_reference", 0)
+    if not isinstance(ref, int) or isinstance(ref, bool):
+        _reply_err(protocol_out, msg, "bad_request",
+                   "variablesReference must be an integer")
+        return
+    #end if
+    _run(protocol_out, msg,
+         lambda: {"variables": _backend_ready().variables(ref)})  # 命令名键重包（父面按键取）
 #end def
 
 

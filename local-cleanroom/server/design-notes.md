@@ -366,6 +366,33 @@ FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
 
 **参数化两钉（2026-10-20 用户裁，1R 落地）**：①**调试器选择=参数**——`schedule.py --backend`（缺省 lldb）spawn 时下传 `session.py --backend`（插拔册键，argparse choices 兜拼错）；②**工具链目录=参数**——父子两级 `--lldb-dir` required（同时装 lldb+lldb-server 的目录），**PATH/系统目录猜测全拆**：make_backend 只在给定目录纯查 find_lldb_server，`_import_lldb` 备援二进制按目录取（`lldb_dir/lldb -P`）；E3 的「显式 env 优先」读通道退役（env 只剩 LLDB 消费侧赋值=launch 内单点）——E3 钉部分翻案带因：env 是隐式注入，参数是显式注入，可插拔架构下发现策略归适配器、输入归操作方。**勘误**：本机工具链=llvm-19（lldb 19.1.7），档案 22.1.8 为异机元数据，进度档环境行收口时改。**攻击点①实证了结**：close()（Destroy+Terminate）确实杀净 stopped-at-entry inferior 与 lldb-server（真饵冒烟孤儿双无），process.Kill() 不需补；另桩时代假设纠正：真线程 id=OS tid（非 1）、线程名=程序名（非 thread-1）、世代帧 id 从 0 起——探针换真饵时 threads→stackTrace 两步走。
 
-**落地记录（2026-10-20 当日，E4 停读面关账）**：llvm-22.1.8 切环境（TUNA 缺 llvm-toolchain-22 谱系 403→换 USTC；lldb-19 连包带默认链接卸、/usr/bin 无版本名指 22；clang 留 19，靶子 clang-19 所编 lldb-22 调试无碍）→步1 原语增员（threads/stack_trace/report_entry_stop/require_phase+码 3011-3014；_generation 漏立户由 LSP 逮）→1R 插拔架构定稿（git mv 保史；SessionError 归 error.py；用户连环翻案：散函数废→每命令 case 废→backend.py 单抽层否——**Protocol 归 session.py 端口、SessionError 归 error.py、SessionState/相位机归适配器私有**，各归其位零新层）→步2 端口面毕业（DebugBackend Protocol 结构性满足零循环/插拔册+工厂懒 import ping 路零后端依赖/_run 统一壳/EOF 坏帧两路 close；桩假分支全退役）→参数化两钉（--backend/--lldb-dir 父子 required；PATH/llvm-glob/env 读通道全拆）→步3 换真饵收网。**网炸两枚**：①dist-packages/lldb 空命名空间包顶 plain import（import 成功≠可用：验签 eStateStopped+踢 sys.modules 槽重导）②桩时代假设被真后端纠正——真线程 id=OS tid 非 1、线程名=程序名非 thread-1、世代帧 id 从 0 起：stackTrace 探针改 **threads→stackTrace 两步走**（DAP 客户端本义）。**网况**：七网全绿——转移表 14 真会话首跑+launch L1/L2+threads/stacktrace（新增孤儿 ps 断言双绿）+framing 8+childseam 8+test_core 5；manual_chain 真链代驾全通（launch 0.3s）。**真化红利**：网钉的从假形状变真形状（真 pid/真 tid/真世代票/真符号名），「桩对真分歧进不来」铁律由真后端兑现；协议网过渡期红转绿的差额=参数缺失非行为伤，收网后无回归。
+**落地记录（2026-10-20 当日，E4 停读面关账）**：llvm-22.1.8 切环境（TUNA 缺 llvm-toolchain-22 谱系 403→换 USTC；lldb-19 连包带默认链接卸、/usr/bin 无版本名指 22；clang 留 19，靶子 clang-19 所编 lldb-22 调试无碍）→步1 原语增员（threads/stack_trace/report_entry_stop/require_phase+码 3011-3014；_generation 漏立户由 LSP 逮）→1R 插拔架构定稿（git mv 保史；SessionError 归 error.py；用户连环翻案：散函数废→每命令 case 废→backend.py 单抽层否——**Protocol 归 session.py 端口、SessionError 归 error.py、SessionState/相位机归适配器私有**，各归其位零新层）→步2 端口面毕业（DebugBackend Protocol 结构性满足零循环/插拔册+工厂懒 import ping 路零后端依赖/_run 统一壳/EOF 坏帧两路 close；桩假分支全退役）→参数化两钉（--backend/--lldb-dir 父子 required；PATH/llvm-glob/env 读通道全拆）→步3 换真饵收网。**网炸两枚**：①dist-packages/lldb 空命名空间包顶 plain import（import 成功≠可用：验签 eStateStopped+踢 sys.modules 槽重导）②桩时代假设被真后端纠正——真线程 id=OS tid 非 1、线程名=程序名非 thread-1、世代帧 id 从 0 起：stackTrace 探针改 **threads→stackTrace 两步走**（DAP 客户端本义）。**网况**：七网全绿——转移表 14 真会话首跑+launch L1/L2+threads/stacktrace（新增孤儿 ps 断言双绿）+framing 8+childseam 8+test_core 5；manual_chain 真链代驾全通（launch 0.3s）。**真化红利**：网钉的从假形状变真形状（真 pid/真 tid/真世代票/真符号名），「桩对真分歧进不来」铁律由真后端兑现；协议网过渡期红转绿的差额=参数缺失非行为伤，收网后无回归。后续勘误：clang 同步升 22.1.8（用户裁全家一致），靶子 clang-22 重编基线不动。
+
+## 横向 scopes/variables 契约（2026-10-20，世代票据消费侧首撞；用户两钉定稿：账本归适配器+守卫单集；转录稿）
+
+**参考线形状（规格来源，零代码继承）**：
+- 父面 server.py:517-581：scopes——`frameId→frame_id`（缺省 0）盲发；成臂 `{"scopes": [{"name", "variablesReference"←variables_reference, "expensive": False}]}`（**expensive 父面补**，适配器不识 DAP 词）；variables——`variablesReference→variables_reference`（缺省 0）；成臂 `{"variables": [{"name", "value", "type", "variablesReference"}]}`
+- 子会话 session.py:461-561：scopes 守卫**单集 stopped**（用户钉，照参考；OQ-2 分集合首分叉——stackTrace 双集/scopes 单集）；frame id 解码（负值/非 int/bool→bad_request；世代≠当前→stale_reference）；_frame_at 验帧（无→no_frame）；**引用=generation*100000+计数器**（第二 id 空间，与帧 id 的 *1000 两套进制），`_var_refs[ref]=(generation, frame_index)` 登记；variables 守卫单集→解引用（未登记/世代旧→stale_reference）→读帧变量**平铺无子**（variables_reference: 0）
+- 引用账本 `_var_refs`/`_ref_counter` 归**适配器私有会话态**（用户钉）：引用生命周期与调试器停相绑定，端口面只见不透明 int；账本生命=Session 生命（close 即亡）
+
+**核（adapter.py，表驱动第二/三行，step/resolve 零改动）**：
+- `Command.SCOPES="scopes"`、`Command.VARIABLES="variables"`+宣言两行
+- DEBUG_SPECS 两行：SCOPES（params frameId→frame_id 缺省 0；body 键映射+expensive 补齐）；VARIABLES（params variablesReference→variables_reference 缺省 0；body 四键映射含 .get 缺省）
+
+**lldb_backend 增员（原语层）**：
+- Session 私有态：`_var_refs: dict`、`_ref_counter: int=0`
+- `scopes(frame_id) -> list[dict]`：require_phase(("stopped",)，NOT_STOPPED)→世代解码（≠当前→STALE_REFERENCE 3015）→帧存在（≥numFrames→NO_FRAME 3016）→ref=generation*100000+(计数器+=1)→登记→`[{"name": "Locals", "variables_reference": ref}]`
+- `variables(ref) -> list[dict]`：require_phase 单集→解引用（未登记/世代旧→STALE_REFERENCE）→帧取变量 `GetVariables(True, True, False, True)` 平铺 `[{"name", "value", "type", "variables_reference": 0}]`
+- error.py：`STALE_REFERENCE=3015`、`NO_FRAME=3016`
+
+**session.py（child 端口面）**：类型哨照家法——scopes 哨 frame_id（int/bool/负→bad_request，参考 decode 的类型域归 child）；variables 哨 ref（int/bool→bad_request）；语义守卫（世代/帧存在/相位）全在适配器。
+
+**网（probe_scopes.py，端口 5689）**：P1 S1 门 1003 / P2 全链→stackTrace 取真帧 id→scopes(frameId)→Locals 引用形状 / P3 variables(ref)→平铺形状（name/value/type str+variablesReference int；内容不钉——get_sign 入口帧 Locals 可空，空列表合法）/ P4 stale 负路（frameId=1000001 世代≠0→2002 detail 携 stale_reference；variablesReference=999999→同）/ P5 收场链+孤儿断言。RED 预期：P1/P2/P3/P4 FAIL（命令未实现），收场绿。test_core 增 resolve 成臂映射两行直测。
+
+**不变量**：壳零改动；新命令成本=成员+宣言行+表行（账本第三次兑现）；引用 int 对端口面不透明（解码归适配器）；scopes/variables 不互使引用失效（失效唯一条件=世代推进——continue 砖的事）。
+
+**预埋攻击点**：①两套进制混抄（帧 id ×1000/引用 ×100000，divmod 抄错）②GetVariables 四布尔参序照抄不换位 ③expensive 补齐必须在父面 body_fn（适配器产 execution-face 词）④空变量列表合法（入口帧 Locals 可空）⑤stale 负路走 ChildRequestError→Rejected→2002 既有链，detail 携子面码（__repr__ 修复兑现）。
+
+**落地记录（2026-10-20 当日）**：RED 5（S1 门/成臂×2/stale×2）→步2 核转录（test_core 9/9，表驱动直测四行新增；S1 门转绿，RED 4=子面未接单）→步3 适配器+child。**网炸一枚**：child 把裸 list 直接当 wire result 上线，父面 body_fn 按键取——`AttributeError: 'list' object has no attribute 'get'` 炸穿父 handle 循环（DAP 连接 EOF）；修=child 侧**命令名键重包** `{"scopes": [...]}`/`{"variables": [...]}`（threads/stack_trace 同款家法），「键重包不裸交」从习惯升格为成文教训。**网况**：probe_scopes 11/11 ALL PASS（RED 5→0）+七网回归全绿。新命令成本账本第三次兑现：成员+宣言两行+表两行+Protocol 两签名+child 两哨两重包+原语两件——**核侧 step/resolve 仍字节未动**。守卫单集（scopes/variables 只收 stopped）与 stackTrace 双集并立=OQ-2 分集合首分叉落地；stale 负路经 ChildRequestError(__repr__)→2002 detail 携码。
 
 **预埋攻击点**：①`close()`（Destroy+Terminate）是否真杀 stopped-at-entry 的 inferior——**已实证了结**：真饵冒烟孤儿双无，process.Kill() 不需补；原忧「只拆 debugger 不杀进程」不成立 ②世代初值 0→帧 id 0 起（桩的 1000 退役；探针钉形状不钉值故无碍）③真 threadId 大整数进 stopped 事件与 threads（translate 不改值，形状闸全绿）④真 launch 1-3s vs 父 10s/网 15s 窗口（慢机）⑤child 侧类型哨与父侧缺省映射的分工（父盲发 thread_id=0 缺省——0 必 no_thread，负路天然可观测）⑥**（1R 已炸已修）空命名空间包顶掉 plain import**——`/usr/lib/python3/dist-packages/lldb` 零成员壳，import 成功≠可用：`_import_lldb` import 后验签 `eStateStopped`、缺=走 `lldb -P` 备援、空壳占 sys.modules 槽先踢再重导（10-19 时 plain import 尚不通，环境漂移使壳包现形——E3 坑清单「plain import 不通」的续集）。

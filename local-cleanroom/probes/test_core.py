@@ -73,6 +73,37 @@ ok = (res.state.phase == StateEnum.S3 and len(frames) == 1
       and frames[0]["body"]["code"] == int(InternalErrCode.UPSTREAM_REFUSED))
 check("resolve: 败臂单帧 2002（Rejected）", ok)
 
+# step（表驱动）：scopes 出站映射
+r = req_of("scopes", {"frameId": 5})
+res = step(ProtoState(phase=StateEnum.S3), r)
+ok = (res.state.phase == StateEnum.S3 and isinstance(res.action, ForwardRequest)
+      and res.action.cmd == "scopes" and res.action.params == {"frame_id": 5})
+check("step: scopes 出站映射（frameId→frame_id）", ok)
+
+# resolve 成臂（表驱动）：scopes 键映射+expensive 父面补
+r = req_of("scopes", {"frameId": 5})
+action = ForwardRequest(req=r, cmd="scopes", params={"frame_id": 5})
+res = resolve(ProtoState(phase=StateEnum.S3), action,
+              Done({"scopes": [{"name": "Locals", "variables_reference": 7}], "junk": 1}))
+frames, _ = build_replies(res.frames, 1)
+ok = (len(frames) == 1 and frames[0]["success"] is True
+      and frames[0]["body"] == {"scopes": [{"name": "Locals",
+                                            "variablesReference": 7,
+                                            "expensive": False}]})
+check("resolve: scopes 成臂（键映射+expensive 父面补，杂键滤除）", ok)
+
+# resolve 成臂（表驱动）：variables 四键映射
+r = req_of("variables", {"variablesReference": 7})
+action = ForwardRequest(req=r, cmd="variables", params={"variables_reference": 7})
+res = resolve(ProtoState(phase=StateEnum.S3), action,
+              Done({"variables": [{"name": "x", "value": "1",
+                                   "type": "int", "variables_reference": 0}]}))
+frames, _ = build_replies(res.frames, 1)
+ok = (len(frames) == 1 and frames[0]["success"] is True
+      and frames[0]["body"] == {"variables": [{"name": "x", "value": "1",
+                                               "type": "int", "variablesReference": 0}]})
+check("resolve: variables 成臂（variablesReference 键映射）", ok)
+
 
 if __name__ == "__main__":
     print("=" * 30)
