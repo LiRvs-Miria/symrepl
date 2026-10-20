@@ -37,7 +37,7 @@
 ### 引擎线（每件配 oracle 对账网）
 - [ ] E1 ktest 解析重写（纯件：真 ktest 喂，对账 M1 parse；值 ADT/错误前置首发）
 - [ ] E2 BranchSite/预扫描语义+走向推断（纯件：合成 PC 序列网；语义源=branches.py，代码不入境）
-- [ ] E4 会话编排（一次性循环→请求驱动；真 session 替桩——lldb_session 已就位，(动作,事件)→SessionState 建模接入口在 design-notes「E3 review 升格」）
+- [ ] E4 会话编排（一次性循环→请求驱动；真 session 替桩）——**步1-2 已落（2026-10-20，d8575a9）**：后端插拔架构（lldb_session→lldb_backend 适配器+session.py 端口面 DebugBackend Protocol/插拔册/工厂懒 import，用户裁"session 不变、调试器可插拔"）、参数化两钉（父子两级 --backend/--lldb-dir required，PATH/系统目录猜测全拆，env 读通道退役）、守卫三码+世代票据 gen=0 生产侧落地、close 杀净孤儿实证、probe_e3 4/4、client 手动工作台（Manual/start_server/全链代驾）；**步3 待做（冷启动从此进）**：probe_launch/threads/stacktrace 换真饵（KT/TG+threads→stackTrace 两步走+孤儿 ps 断言+spawn 带 --lldb-dir）→七网回归（协议网现因 --lldb-dir required 过渡期红，非行为伤）→桩假分支退役即 E4 停读面关账
 
 ## 挂账（未决小钉，撞结再裁）
 
@@ -56,6 +56,6 @@
 
 ## 环境
 
-- 本机（lxg）：clang/clang++/lldb 22.1.8 系统级；lldb python 绑定经 `lldb -P` 定位（plain import 不通）；无 ~/venvs/symrepl（旧机路径失效，M1 CLI 若跑需重建）
-- 真靶子：`/tmp/opencode/replay-build/get_sign`（按 tests/conftest.py 配方即建；直跑基线 test1→0 / test2→1 / test3→255）
-- 探针全封闭跨机可跑（odot 硬编码已相对化；KT 相对化，TG 仍不透明载荷）；端口：转移表 5681 / launch 5683 / threads 5685；framing 起服自洁 fuser（psmisc 已装）
+- 本机：唯一工具链 **llvm-19**（lldb 19.1.7；旧档 22.1.8 为异机元数据）；工具链目录经 `--lldb-dir` 参数显式给（=lldb+lldb-server 同册，如 /usr/lib/llvm-19/bin），服务侧零 PATH 猜测；绑定定位 plain import→`lldb_dir/lldb -P` 备援（dist-packages 空命名空间包坑已修，design-notes E4 节）；无 ~/venvs/symrepl（M1 CLI 若跑需重建）
+- 真靶子：`/tmp/opencode/replay-build/get_sign`（按 tests/conftest.py 配方即建，易失；直跑最小环境基线 test1→0 / test2→1 / test3→255）
+- 探针全封闭跨机可跑（odot 硬编码已相对化；KT 相对化，TG 仍不透明载荷）；端口：转移表 5681 / launch 5683 / threads 5685 / stacktrace 5687；framing 起服自洁 fuser（psmisc 已装）；手动测试入口=client/dap_client.py（Manual 驱动器/一键代驾/-i 交互）
