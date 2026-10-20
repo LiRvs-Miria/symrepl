@@ -25,6 +25,7 @@
 | 横向 threads | THREADS 成员+(S3,THREADS) 代理自回环；resolve 落靶**按 DAP 命令分业务**（放行双帧/代理单帧，body 映射杂键滤除） | ✅ 2026-10-19（dab49e1）；probe_threads RED(2)→全绿；壳零改动=横向复利首证；网炸败臂混用+RST 下游伤入 design-notes |
 | E3 LLDB 会话原语 | lldb_session.py：纯核代数（`classify_event`→Drop/Accept 附因、`SessionState` ADT 未知携值、结果/错误当值返回）+SB 壳（launch 入口停 KTEST_FILE 最小环境/事件排空/单 debugger 构造期守门）；SessionErrCode 3xxx 入 error.py；env 出层=启动参数 debugserver_path+`find_lldb_server` 纯函数；`_physical(e, fallback)` 缺省版接四非纯面 | ✅ 2026-10-19（2f7780a+c517cec）；probe_e3 三 ktest oracle diff=0；新坑三枚+lldb-server 定位+盲区记档入 design-notes |
 | 横向 stackTrace | 守卫入门+表驱动收编：DEBUG_SPECS 规格表+step_debug/settle_debug 通用执行器（step (S3,_) 整层路由，单枚举不动，新命令=成员+宣言行+一行表）；桩相位机三态+stack_trace 守卫三码（bool 排除哨照参考）；网炸 ChildRequest*/ChildGone* 补 `__repr__`（子面码进 detail/日志，2002 链不动） | ✅ 2026-10-20（a2b114e）；probe_stacktrace RED 3→7/7+test_core 5/5（新持久纯核直测网）+五旧网全绿；分层翻案史两轮+not_stopped 负路押后随 continue 入 design-notes |
+| E4 停读面第一刀 | 真 session 替桩：lldb_backend 适配器（原语面五件+相位机+世代票据 gen0）+session.py 端口面毕业（DebugBackend Protocol/插拔册/工厂，"session 不变、调试器可插拔"）+参数化两钉（父子 --backend/--lldb-dir required，PATH/env 猜测全拆）+llvm-22.1.8 切环境；client 手动工作台（Manual/一键代驾/-i）；网炸空命名空间包（验签踢槽）+桩假设被真 tid 纠正（两步走） | ✅ 2026-10-20（d8575a9+本笔）；七网全绿（转移表真会话首跑+孤儿断言双绿）+probe_e3 diff=0×3+manual_chain 真链通；not_stopped 负探针仍随 continue |
 
 ## 待办
 
@@ -37,7 +38,7 @@
 ### 引擎线（每件配 oracle 对账网）
 - [ ] E1 ktest 解析重写（纯件：真 ktest 喂，对账 M1 parse；值 ADT/错误前置首发）
 - [ ] E2 BranchSite/预扫描语义+走向推断（纯件：合成 PC 序列网；语义源=branches.py，代码不入境）
-- [ ] E4 会话编排（一次性循环→请求驱动；真 session 替桩）——**步1-2 已落（2026-10-20，d8575a9）**：后端插拔架构（lldb_session→lldb_backend 适配器+session.py 端口面 DebugBackend Protocol/插拔册/工厂懒 import，用户裁"session 不变、调试器可插拔"）、参数化两钉（父子两级 --backend/--lldb-dir required，PATH/系统目录猜测全拆，env 读通道退役）、守卫三码+世代票据 gen=0 生产侧落地、close 杀净孤儿实证、probe_e3 4/4、client 手动工作台（Manual/start_server/全链代驾）；**步3 待做（冷启动从此进）**：probe_launch/threads/stacktrace 换真饵（KT/TG+threads→stackTrace 两步走+孤儿 ps 断言+spawn 带 --lldb-dir）→七网回归（协议网现因 --lldb-dir required 过渡期红，非行为伤）→桩假分支退役即 E4 停读面关账
+- [ ] E4 会话编排续刀（停读面已关，余：continue/事件流接线——lldb_backend.continue_/wait_state/exit_code 已有、running 相位入册、stopped(reason:step/breakpoint) 真事件回流、(动作,事件)→SessionState 编洛建模、stop 响应真实化）
 
 ## 挂账（未决小钉，撞结再裁）
 
@@ -56,6 +57,6 @@
 
 ## 环境
 
-- 本机：唯一工具链 **llvm-19**（lldb 19.1.7；旧档 22.1.8 为异机元数据）；工具链目录经 `--lldb-dir` 参数显式给（=lldb+lldb-server 同册，如 /usr/lib/llvm-19/bin），服务侧零 PATH 猜测；绑定定位 plain import→`lldb_dir/lldb -P` 备援（dist-packages 空命名空间包坑已修，design-notes E4 节）；无 ~/venvs/symrepl（M1 CLI 若跑需重建）
+- 本机：**llvm-22.1.8 全家**（lldb/clang/clang++ 22.1.8，Debian 官方源装；apt 源已由 TUNA 换 USTC——TUNA 缺 llvm-toolchain-22 谱系且 403；无版本名 /usr/bin/{lldb,clang,clang++} 均手指 22；llvm-19 库残留无害）；工具链目录经 `--lldb-dir` 参数显式给（=lldb+lldb-server 同册，**现为 /usr/lib/llvm-22/bin**），服务侧零 PATH 猜测；绑定定位 plain import→`lldb_dir/lldb -P` 备援（dist-packages 空命名空间包坑已修，design-notes E4 节）；无 ~/venvs/symrepl（M1 CLI 若跑需重建）
 - 真靶子：`/tmp/opencode/replay-build/get_sign`（按 tests/conftest.py 配方即建，易失；直跑最小环境基线 test1→0 / test2→1 / test3→255）
-- 探针全封闭跨机可跑（odot 硬编码已相对化；KT 相对化，TG 仍不透明载荷）；端口：转移表 5681 / launch 5683 / threads 5685 / stacktrace 5687；framing 起服自洁 fuser（psmisc 已装）；手动测试入口=client/dap_client.py（Manual 驱动器/一键代驾/-i 交互）
+- 探针真饵化（2026-10-20 起：launch/threads/stacktrace/转移表走真 LLDB 会话，依赖本机 lldb 22+靶子；封闭网=framing/childseam/test_core）；端口：转移表 5681 / launch 5683 / threads 5685 / stacktrace 5687；framing 起服自洁 fuser（psmisc 已装）；手动测试入口=client/dap_client.py（Manual 驱动器/一键代驾/-i 交互）
