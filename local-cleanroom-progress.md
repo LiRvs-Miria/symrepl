@@ -24,13 +24,14 @@
 | 砖3 放行+stopped 回流 | configDone 携 `ForwardRequest` 先递 `config_done` 后落双帧（败=双帧皆败留 S2 可重递）；`translate_child_event` 只翻不判+壳 sink 回流领 seq（D3 兑现） | ✅ 2026-10-19（2904c62+8a7d9de+9d9b57c）；L1/L2 全绿+R8 翻案宽容三帧；事件不改协议状态（状态门挂账） |
 | 横向 threads | THREADS 成员+(S3,THREADS) 代理自回环；resolve 落靶**按 DAP 命令分业务**（放行双帧/代理单帧，body 映射杂键滤除） | ✅ 2026-10-19（dab49e1）；probe_threads RED(2)→全绿；壳零改动=横向复利首证；网炸败臂混用+RST 下游伤入 design-notes |
 | E3 LLDB 会话原语 | lldb_session.py：纯核代数（`classify_event`→Drop/Accept 附因、`SessionState` ADT 未知携值、结果/错误当值返回）+SB 壳（launch 入口停 KTEST_FILE 最小环境/事件排空/单 debugger 构造期守门）；SessionErrCode 3xxx 入 error.py；env 出层=启动参数 debugserver_path+`find_lldb_server` 纯函数；`_physical(e, fallback)` 缺省版接四非纯面 | ✅ 2026-10-19（2f7780a+c517cec）；probe_e3 三 ktest oracle diff=0；新坑三枚+lldb-server 定位+盲区记档入 design-notes |
+| 横向 stackTrace | 守卫入门+表驱动收编：DEBUG_SPECS 规格表+step_debug/settle_debug 通用执行器（step (S3,_) 整层路由，单枚举不动，新命令=成员+宣言行+一行表）；桩相位机三态+stack_trace 守卫三码（bool 排除哨照参考）；网炸 ChildRequest*/ChildGone* 补 `__repr__`（子面码进 detail/日志，2002 链不动） | ✅ 2026-10-20（a2b114e）；probe_stacktrace RED 3→7/7+test_core 5/5（新持久纯核直测网）+五旧网全绿；分层翻案史两轮+not_stopped 负路押后随 continue 入 design-notes |
 
 ## 待办
 
 ### 协议线
 - [ ] 砖4 收场路（**押后中**）：disconnect 带 child 拆除（`TearDownChild` 占位员落位）、退出码归类
 - [ ] 砖5 child 死路混沌探针（立场乙：父活快败陪到底）
-- [ ] 横向剩余 7 条（每条=完整循环）：stackTrace（守卫入门）→ scopes/variables（世代票据首撞）→ continue（运行态+事件流）→ setBreakpoints → next/stepIn/stepOut/pause → terminate → replay.branchTrace（引擎集大成，横向收尾）
+- [ ] 横向剩余 6 条（每条=完整循环）：scopes/variables（世代票据首撞）→ continue（运行态+事件流；not_stopped 负探针在此补）→ setBreakpoints → next/stepIn/stepOut/pause → terminate → replay.branchTrace（引擎集大成，横向收尾；OQ-2 预告走 output 事件流非简单代理）
 - [ ] 收尾清单：stdio 模式、cli.py:151 接线改挂、pytest DAP 面 41 项改挂、ADR 注、原包 dap 四件退役、5c 真逻辑填实
 
 ### 引擎线（每件配 oracle 对账网）
