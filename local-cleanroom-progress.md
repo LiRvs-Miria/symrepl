@@ -25,14 +25,15 @@
 | 横向 threads | THREADS 成员+(S3,THREADS) 代理自回环；resolve 落靶**按 DAP 命令分业务**（放行双帧/代理单帧，body 映射杂键滤除） | ✅ 2026-10-19（dab49e1）；probe_threads RED(2)→全绿；壳零改动=横向复利首证；网炸败臂混用+RST 下游伤入 design-notes |
 | E3 LLDB 会话原语 | lldb_session.py：纯核代数（`classify_event`→Drop/Accept 附因、`SessionState` ADT 未知携值、结果/错误当值返回）+SB 壳（launch 入口停 KTEST_FILE 最小环境/事件排空/单 debugger 构造期守门）；SessionErrCode 3xxx 入 error.py；env 出层=启动参数 debugserver_path+`find_lldb_server` 纯函数；`_physical(e, fallback)` 缺省版接四非纯面 | ✅ 2026-10-19（2f7780a+c517cec）；probe_e3 三 ktest oracle diff=0；新坑三枚+lldb-server 定位+盲区记档入 design-notes |
 | 横向 stackTrace | 守卫入门+表驱动收编：DEBUG_SPECS 规格表+step_debug/settle_debug 通用执行器（step (S3,_) 整层路由，单枚举不动，新命令=成员+宣言行+一行表）；桩相位机三态+stack_trace 守卫三码（bool 排除哨照参考）；网炸 ChildRequest*/ChildGone* 补 `__repr__`（子面码进 detail/日志，2002 链不动） | ✅ 2026-10-20（a2b114e）；probe_stacktrace RED 3→7/7+test_core 5/5（新持久纯核直测网）+五旧网全绿；分层翻案史两轮+not_stopped 负路押后随 continue 入 design-notes |
-| E4 停读面第一刀 | 真 session 替桩：lldb_backend 适配器（原语面五件+相位机+世代票据 gen0）+session.py 端口面毕业（DebugBackend Protocol/插拔册/工厂，"session 不变、调试器可插拔"）+参数化两钉（父子 --backend/--lldb-dir required，PATH/env 猜测全拆）+llvm-22.1.8 切环境；client 手动工作台（Manual/一键代驾/-i）；网炸空命名空间包（验签踢槽）+桩假设被真 tid 纠正（两步走） | ✅ 2026-10-20（d8575a9+本笔）；七网全绿（转移表真会话首跑+孤儿断言双绿）+probe_e3 diff=0×3+manual_chain 真链通；not_stopped 负探针仍随 continue |
+| E4 停读面第一刀 | 真 session 替桩：lldb_backend 适配器（原语面五件+相位机+世代票据 gen0）+session.py 端口面毕业（DebugBackend Protocol/插拔册/工厂，"session 不变、调试器可插拔"）+参数化两钉（父子 --backend/--lldb-dir required，PATH/env 猜测全拆）+llvm-22.1.8 切环境；client 手动工作台（Manual/一键代驾/-i）；网炸空命名空间包（验签踢槽）+桩假设被真 tid 纠正（两步走） | ✅ 2026-10-20（d8575a9+步3 收网笔）；七网全绿（转移表真会话首跑+孤儿断言双绿）+probe_e3 diff=0×3+manual_chain 真链通；not_stopped 负探针仍随 continue |
+| 横向 scopes/variables | 世代票据消费侧首撞：表驱动第 4/5 命令（step/resolve 零改动）；适配器 scopes/variables 原语+引用账本（gen*100000+计数器，适配器私有）+码 3015/3016+守卫单集（OQ-2 分集合首分叉）；网炸 child 裸 list 上线——修=命令名键重包成文家法 | ✅ 2026-10-20（随本批入库）；probe_scopes RED 5→11/11+test_core 9/9+七网回归全绿；新命令成本账本第三次兑现 |
 
 ## 待办
 
 ### 协议线
 - [ ] 砖4 收场路（**押后中**）：disconnect 带 child 拆除（`TearDownChild` 占位员落位）、退出码归类
 - [ ] 砖5 child 死路混沌探针（立场乙：父活快败陪到底）
-- [ ] 横向剩余 6 条（每条=完整循环）：scopes/variables（世代票据首撞）→ continue（运行态+事件流；not_stopped 负探针在此补）→ setBreakpoints → next/stepIn/stepOut/pause → terminate → replay.branchTrace（引擎集大成，横向收尾；OQ-2 预告走 output 事件流非简单代理）
+- [ ] 横向剩余 5 条（每条=完整循环）：continue（运行态+事件流；not_stopped 负探针在此补；横向与 E4 续刀合流点）→ setBreakpoints → next/stepIn/stepOut/pause → terminate → replay.branchTrace（引擎集大成，横向收尾；OQ-2 预告走 output 事件流非简单代理）
 - [ ] 收尾清单：stdio 模式、cli.py:151 接线改挂、pytest DAP 面 41 项改挂、ADR 注、原包 dap 四件退役、5c 真逻辑填实
 
 ### 引擎线（每件配 oracle 对账网）
