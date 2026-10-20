@@ -1,6 +1,6 @@
 # cleanroom 转正推进状态（立项 2026-10-16：local-cleanroom 替代 src/symrepl/dap/）
 
-> 本文件是会话进度快照（**冻结 2026-10-19**），冷启动从此取活。
+> 本文件是会话进度快照（**冻结 2026-10-20**），冷启动从此取活。
 > 配套：[`local-cleanroom/server/design-notes.md`](local-cleanroom/server/design-notes.md)（设计档案，随码走，含契约/裁决/命名/通道选型/网炸史全记录）、[`../research-survey/plan/ai-independence.md`](../research-survey/plan/ai-independence.md)（承重协议 v1.3，§2.6 决策节律）、[`../research-survey/plan/ai-ledger.md`](../research-survey/plan/ai-ledger.md)（对账账本，追加式）。
 > 前史：phase1（2026-10-12 关账）/ phase2（2026-10-15 收官）的 local-test* 档案已删除（2026-10-16），考古走 git 历史。
 
@@ -28,7 +28,8 @@
 | E4 停读面第一刀 | 真 session 替桩：lldb_backend 适配器（原语面五件+相位机+世代票据 gen0）+session.py 端口面毕业（DebugBackend Protocol/插拔册/工厂，"session 不变、调试器可插拔"）+参数化两钉（父子 --backend/--lldb-dir required，PATH/env 猜测全拆）+llvm-22.1.8 切环境；client 手动工作台（Manual/一键代驾/-i）；网炸空命名空间包（验签踢槽）+桩假设被真 tid 纠正（两步走） | ✅ 2026-10-20（d8575a9+步3 收网笔）；七网全绿（转移表真会话首跑+孤儿断言双绿）+probe_e3 diff=0×3+manual_chain 真链通；not_stopped 负探针仍随 continue |
 | 横向 scopes/variables | 世代票据消费侧首撞：表驱动第 4/5 命令（step/resolve 零改动）；适配器 scopes/variables 原语+引用账本（gen*100000+计数器，适配器私有）+码 3015/3016+守卫单集（OQ-2 分集合首分叉）；网炸 child 裸 list 上线——修=命令名键重包成文家法 | ✅ 2026-10-20（f4b1bca）；probe_scopes RED 5→11/11+test_core 9/9+七网回归全绿；新命令成本账本第三次兑现 |
 | continue | 横向与 E4 合流点：子进程事件泵（参考同构 reader 线程+owner 轮询，事件先发+dead 短路）+世代推进（决策 12 resume 失效）+exited/terminated 父面一变二（单源：child 只发执行面 exited）+_MAX_RESUMES 不随迁（偏离带因）；网炸端口面漏接单+terminated 双发（单源裁决）；守卫序勘误（相位先于世代解码，stale 触发随 setBreakpoints 迁移） | ✅ 2026-10-20（336b127）；probe_continue RED 6→12/12+八网回归全绿；DAP 生命周期首次全程可观测（launch→入口停→continue→exited+terminated） |
-| 横向 setBreakpoints | 第二次停相产出者：核表第 6 命令（params_fn 嵌套提取/非 dict 过滤+body verified 缺省）+backend 断点表全量替换（记册删旧/location 地址回解析 resolved+记册）+stop_reason_label 纯核推断（bp id 携 breakpoint_ids，count 0 越界防）+child 类型哨/键重包/Protocol 签名；守卫分布=类型域归 child、not_launched+空 path 留 backend；网炸**双键重包**（契约互斥表述，修=bare list+child 重包家法同构，与 scopes 砖忘重包成对）；RED 预测勘误 P7（单链直通 exit 先消费生命周期对，用户裁照单收） | ✅ 2026-10-20（待提交笔）；probe_breakpoints RED 10→17 查 ALL PASS+九网回归全绿；stale_reference 负路首次真实触发（世代票据消费侧闭环）+not_stopped/stale 两负路兑现 |
+| 横向 setBreakpoints | 第二次停相产出者：核表第 6 命令（params_fn 嵌套提取/非 dict 过滤+body verified 缺省）+backend 断点表全量替换（记册删旧/location 地址回解析 resolved+记册）+stop_reason_label 纯核推断（bp id 携 breakpoint_ids，count 0 越界防）+child 类型哨/键重包/Protocol 签名；守卫分布=类型域归 child、not_launched+空 path 留 backend；网炸**双键重包**（契约互斥表述，修=bare list+child 重包家法同构，与 scopes 砖忘重包成对）；RED 预测勘误 P7（单链直通 exit 先消费生命周期对，用户裁照单收） | ✅ 2026-10-20（6d5d1bb）；probe_breakpoints RED 10→17 查 ALL PASS+九网回归全绿；stale_reference 负路首次真实触发（世代票据消费侧闭环）+not_stopped/stale 两负路兑现 |
+| 引擎线 E1 ktest 解析重写 | 引擎线首件（新册 replay/，零代码继承首落地）：四答定稿（纯读/Expect 代数 KTest\|KtestBad 当值不抛/KtestBadReason 封闭三枚照 FrameBad 家法/新册）；值 ADT 字段同款 M1（v1→sym 0/0）；撞裁=私有 _Truncated fail-fast+parse 边界单点转值（逐点 None 检查漏检面大不取）；**语料册自检前置**（17 合成例+6 真件先对 M1 oracle 合预期，挡掉语料册两处 layout 错） | ✅ 2026-10-20（待提交笔）；probe_ktest RED 10→10/10 零网炸+纯网三件回归绿（server/ 零 diff，LLDB 六网无风险） |
 
 ## 待办
 
@@ -39,8 +40,7 @@
 - [ ] 收尾清单：stdio 模式、cli.py:151 接线改挂、pytest DAP 面 41 项改挂、ADR 注、原包 dap 四件退役、5c 真逻辑填实
 
 ### 引擎线（每件配 oracle 对账网）
-- [ ] E1 ktest 解析重写（纯件：真 ktest 喂，对账 M1 parse；值 ADT/错误前置首发）
-- [ ] E2 BranchSite/预扫描语义+走向推断（纯件：合成 PC 序列网；语义源=branches.py，代码不入境）
+- [ ] E2 BranchSite/预扫描语义+走向推断（纯件：合成 PC 序列网；语义源=branches.py+trace.py 纯面，代码不入境）
 - [ ] E4 会话编排续刀（continue 砖带事件泵+running 相位+事件流，setBreakpoints 砖带 reason 推断；余：(动作,事件)→SessionState 编洛建模收敛、branchTrace 的 trace_report 输出事件流）
 
 ## 挂账（未决小钉，撞结再裁）
