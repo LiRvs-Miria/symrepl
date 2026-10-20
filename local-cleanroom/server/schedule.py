@@ -4,6 +4,7 @@ pipeline：msg → step（状态转移）→ build_replies（回包+seq 账本�
 壳只做 I/O 与收场；协议状态（ProtoState）由 step 返回值搬运，收场即丢弃。
 日志只走 stderr：stdout 将来是说 DAP 协议的（stdio transport），不许污染。
 """
+import argparse
 import asyncio
 import contextlib
 import functools
@@ -274,7 +275,9 @@ async def run_effect(conn: "ConnState", action: Action) -> Outcome:
         case FulfillLaunch(req):
             child = None
             try:
-                child = await spawn_child([sys.executable, SESSION_SCRIPT])
+                child = await spawn_child([sys.executable, SESSION_SCRIPT,
+                                           "--backend", conn.backend,
+                                           "--lldb-dir", conn.lldb_dir])
                 await child_ping(child)
                 result = await child_request(child, "launch",
                                              {"ktest": req.arguments["ktest"],
@@ -321,6 +324,9 @@ class ConnState:
     # 壳搬运的两本账：协议状态 + 回包 seq
     pstate: ProtoState = ProtoState(phase=StateEnum.S0)
     seq: int = 1
+    # 后端插拔参数（main 按 argv 填真值；spawn 时下传子进程）
+    backend: str = "lldb"
+    lldb_dir: str = ""
 #end class
 
 
@@ -412,9 +418,9 @@ def on_signal(conn: ConnState):
 #end def
 
 
-async def main(host: str, port: int):
+async def main(host: str, port: int, *, backend: str, lldb_dir: str):
     loop = asyncio.get_running_loop()
-    conn = ConnState()
+    conn = ConnState(backend=backend, lldb_dir=lldb_dir)
 
     server = await asyncio.start_server(
         functools.partial(handle, conn=conn),
@@ -436,6 +442,14 @@ async def main(host: str, port: int):
 
 
 if __name__ == "__main__":
-    asyncio.run(main("127.0.0.1", int(sys.argv[1]) if len(sys.argv) > 1 else 5678))
+    parser = argparse.ArgumentParser(prog="schedule")
+    parser.add_argument("port", nargs="?", type=int, default=5678)
+    parser.add_argument("--backend", default="lldb",
+                        help="debugger backend name（插拔册键）")
+    parser.add_argument("--lldb-dir", required=True, metavar="DIR",
+                        help="toolchain dir containing lldb and lldb-server")
+    _a = parser.parse_args()
+    asyncio.run(main("127.0.0.1", _a.port,
+                     backend=_a.backend, lldb_dir=_a.lldb_dir))
     # §0 观察点：单栈 127.0.0.1（localhost 双栈会在半绑定失败时拖死全体，2026-10-14 实测）
 #end if

@@ -336,3 +336,34 @@ FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
 **预埋攻击点**：①bool 漏判（isinstance(True,int)=True，参考专门排除，桩照抄该哨）②两套词法键名转录拼错（threadId/thread_id、stackFrames/stack_frames、levels 三对）③成臂 match 漏 case（unhandled AssertionError 兜底已在，忘加 case=当场炸）④桩相位机回归（config_done 路两个既有探针网必须原样绿）。
 
 **落地记录（2026-10-20 当日，AI 小步转录+用户逐步 review）**：步序=契约→RED 探针（**RED 3**：P1/P2/P3，命令未入 match_command 时 S1 门钉也过不了——parse 兜 1001，修正初稿 RED 2 误记）→核转录（P1 转绿，RED 2，`test_core.py` 新持久纯核直测网 5/5=E3 盲区裁决兑现）→分层翻案两轮（见工程分层裁决段）→桩转录（`_phase` 相位机 entry→entry_stopped→stopped，守卫序=类型哨(bool 排除)→相位→线程存在，假帧 id=1000=世代形状 0*1000+0，levels 坏值静默回 20 照参考）。**网炸一枚（真收获）**：P3 断言「'no_thread' 进 detail」实测扑空——detail=`ChildRequestError('no thread with id 99')`，**code 属性结构性在、repr 不显**（`__init__` 只交 message 给 super；默认 repr 只显构造参数），detail 串与 `effect_failed` 日志双场合丢子面错误分类学。修法=`ChildGoneError`/`ChildRequestError` 补 `__repr__`（code+message 都进 repr，单点修复两场合同时受益；同构同病顺手对称）。2002 链不动，probe 7/7 全绿。**网况**：probe_stacktrace 7/7+test_core 5/5+五旧网全绿（转移表/threads/launch/framing/childseam）。**not_stopped 负路**照契约押后（S3 内桩恒 stopped 不可观测），探针随 continue 砖补。**编辑纪律教训**：同形代码块（多个 `case _` 兜底臂）并发编辑 oldString 串位两刀（settle_debug 末臂、resolve 末臂各中一次），LSP+整读全文逮住单刀修复——同形块编辑必须带唯一锚点逐个落。
+
+## E4 停读面契约（2026-10-20，用户两钉：现在接·甲就地演化；AI 转录稿待过目）
+
+**范围裁决**：本刀只接**停-读面**=launch/config_done/threads/stack_trace 四命令真化+收场 close 路；continue/exited/running 相位留横向；（动作,事件）→SessionState 全编排建模不抢跑（continue 砖再上）；世代票据（decision 12）**生产侧在此提前落地**（原定 scopes/variables 首撞，scopes 届时只撞消费侧）。**网策略（用户裁·甲）**：桩假分支逐个替换，协议网换真饵——网变强（钉真形状）代价=变慢+机器绑定（lldb+靶子），桩案风险闸「探针钉死真线形状」的既定兑现。
+
+**lldb_session 增员（原语层，纯/非纯劈分照家法）**：
+- `Session._phase`：`"entry"`（构造后）→launch 成功（入口停已在 launch 内等到）=`"entry_stopped"`→config_done 报停=`"stopped"`；running/dead 随 continue 砖入册
+- `require_phase(phase, allowed, action) -> SessionError | None` 纯函数：守卫判定下沉当值返回（家法）
+- SessionErrCode 新员（撞结即补）：`NOT_STOPPED=3011`、`NOT_LAUNCHED=3012`
+- `threads() -> list[dict]`：**无相位守卫**（process 在即可，参考同）；单线程契约取 thread 0：`[{"id": int(GetThreadID), "name": GetName() or f"thread-{id}"}]`
+- `stack_trace(thread_id, levels) -> dict`：守卫 stopped/entry_stopped（else NOT_STOPPED）→`GetThreadByID` 无效→no_thread（wire 侧 "no_thread"，见 session 映射）→帧数=`min(max(levels,1), numFrames)`，帧=`{id: generation*1000+index, name: 函数名 or 0x{PC:x}, line, column, path}`；`_generation` 初值 **0**（参考 :102 对齐，帧 id 从 0 起）；返回 `{"stack_frames", "total_frames"}`
+- `report_entry_stop() -> dict`：config_done 原语——守卫 entry_stopped（else NOT_LAUNCHED）→相位落 stopped→回 stopped 事件 params `{"reason": "entry", "thread_id": thread0 id, "all_threads_stopped": True}`（thread_id=真 SB id，替桩假 1）
+
+**session.py 就地演化（执行面非纯壳）**：
+- `ping`/`unknown_command`/帧循环/`--log` hygiene 不动；`load_lldb` 懒加载不进握手路（ping 无 lldb 依赖）
+- launch：params 防御校验（ktest/target 非空串，坏=bad_request）→`find_lldb_server`（显式 env>lldb 同目录>/usr/lib/llvm-*，目录序启动层构造）→`Session(target, debugserver_path=…)`→`launch(ktest)`→回 `{pid: process.GetProcessID()}`（真 inferior pid 替桩自身 pid）
+- config_done：`report_entry_stop()`→应答 `{}`+真 params 的 stopped 事件
+- threads/stack_trace：类型哨（thread_id 非 int 含 bool→bad_request；levels 坏值静默 20）在 child，守卫在原语
+- **错误翻译**：`SessionError`→wire `{"ok": False, "error": {"code": err.code.name.lower(), "message": …}}`（3xxx 名转 snake 串；与桩的字符串码族 "bad_request"/"no_thread" 同形）
+- **收场路（硬前置）**：stdin-EOF（msg None）与坏帧（exit3）两路都尽力 `session.close()`（try/except 包裹）——真 inferior 不杀会吃机器；无 Session 即直退（ping-only 握手会话）
+
+**探针换真饵**：
+- probe_launch/probe_threads/probe_stacktrace：`"k"/"t"`→真饵（KT=`third_party/klee/ktest/get_sign_test000003.ktest` 相对化、TG=`/tmp/opencode/replay-build/get_sign` 配方即建）；转移表网已是真饵不动
+- recv 窗口 5s→15s（真 LLDB launch 1-3s；父侧 child_request timeout=10s 照旧，慢机风险挂账）
+- **孤儿 inferior 断言**：收场探针加 ps/pgrep 检查（会话毕无残留 get_sign/lldb-server 进程）
+
+**不变量**：父侧零改动（FulfillLaunch/落靶/事件回流/表驱动全不动）；ping 无会话依赖；桩字符串码族形状不变（子面码经 ChildRequestError.code 进 2002 detail——stackTrace 砖的 `__repr__` 修复兑现侦察能力）。**后端缝纪律（2026-10-20 用户钉：session 不变、调试器可换）**：session.py=调试器无关端口面（wire/派发/类型哨/线格式，只说执行面语汇），lldb_session=可换后端适配器（SB/lldb-server/事件分类/相位机归后端所有）——换引擎=写同原语面的新适配器，session.py 一行不改；本刀**保缝不立制**：LLDB 接触收敛单点 import，handler 只调原语方法；Protocol/注册表等正式抽象等第二个后端出现再立（两样本纪律，PROXY_SPECS 同尺）。
+
+**参数化两钉（2026-10-20 用户裁，1R 落地）**：①**调试器选择=参数**——`schedule.py --backend`（缺省 lldb）spawn 时下传 `session.py --backend`（插拔册键，argparse choices 兜拼错）；②**工具链目录=参数**——父子两级 `--lldb-dir` required（同时装 lldb+lldb-server 的目录），**PATH/系统目录猜测全拆**：make_backend 只在给定目录纯查 find_lldb_server，`_import_lldb` 备援二进制按目录取（`lldb_dir/lldb -P`）；E3 的「显式 env 优先」读通道退役（env 只剩 LLDB 消费侧赋值=launch 内单点）——E3 钉部分翻案带因：env 是隐式注入，参数是显式注入，可插拔架构下发现策略归适配器、输入归操作方。**勘误**：本机工具链=llvm-19（lldb 19.1.7），档案 22.1.8 为异机元数据，进度档环境行收口时改。**攻击点①实证了结**：close()（Destroy+Terminate）确实杀净 stopped-at-entry inferior 与 lldb-server（真饵冒烟孤儿双无），process.Kill() 不需补；另桩时代假设纠正：真线程 id=OS tid（非 1）、线程名=程序名（非 thread-1）、世代帧 id 从 0 起——探针换真饵时 threads→stackTrace 两步走。
+
+**预埋攻击点**：①`close()`（Destroy+Terminate）是否真杀 stopped-at-entry 的 inferior **待实证**——若只拆 debugger 不杀进程=孤儿，探针 ps 断言当场炸，届时补 process.Kill() ②世代初值 0→帧 id 0 起（桩的 1000 退役；探针钉形状不钉值故无碍）③真 threadId 大整数进 stopped 事件与 threads（translate 不改值，形状闸全绿）④真 launch 1-3s vs 父 10s/网 15s 窗口（慢机）⑤child 侧类型哨与父侧缺省映射的分工（父盲发 thread_id=0 缺省——0 必 no_thread，负路天然可观测）⑥**（1R 已炸已修）空命名空间包顶掉 plain import**——`/usr/lib/python3/dist-packages/lldb` 零成员壳，import 成功≠可用：`_import_lldb` import 后验签 `eStateStopped`、缺=走 `lldb -P` 备援、空壳占 sys.modules 槽先踢再重导（10-19 时 plain import 尚不通，环境漂移使壳包现形——E3 坑清单「plain import 不通」的续集）。

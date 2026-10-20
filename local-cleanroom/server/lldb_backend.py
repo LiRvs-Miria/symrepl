@@ -1,4 +1,8 @@
-"""lldb_session — LLDB 会话原语（纯判定核 + SB 非纯壳）。
+"""lldb_backend — LLDB 后端适配器（实现 session.py 端口的 DebugBackend 原语面）。
+
+session 不变、调试器可插拔（2026-10-20 用户裁）：本模块=可替换后端之一；
+换引擎=写同原语面的 *_backend.py + session.py 工厂表一行。结构性满足
+DebugBackend（session.py 内声明），本模块不 import 端口（零循环）。
 
 纯/非纯劈分：判定全部下沉纯函数——plain 值进出、结果/错误当值返回（家法对齐
 FrameBad/BadChildMsg：不抛、不猜、不续）、错误码代数归 error.py 3xxx；
@@ -8,7 +12,7 @@ SB 调用只住在 Session 壳里取数与动作——会话生命周期可按 (
 坑清单即契约（phase1 蒸馏+本轮现形）：
 - 模块定位：plain import 失败走 `lldb -P`
 - 单进程单 debugger：宿主复用 Create 静默 no-op+失败后 Continue 永挂 →
-  第二个 Session 构造期大声拒绝
+  第二个 Session 构造期大声拒绝（LLDB 宿主怪癖，守门归本适配器）
 - 事件排空：判定在 classify_event（纯）——非本 process/非进程/Running 过场全丢
 - owner-thread：SB API 只许创建 Session 的线程调用；本模块不启任何线程
 - lldb-server：本地 launch 硬依赖；发现=find_lldb_server（纯，目录序为入参），
@@ -23,7 +27,7 @@ import sys
 from enum import Enum
 from typing import NamedTuple, assert_never
 
-from error import SessionErrCode
+from error import SessionErrCode, SessionError
 
 DEBUG_SERVER_ENV = "LLDB_DEBUGSERVER_PATH"    # LLDB 的消费通道名（启动层引用）
 
@@ -126,15 +130,6 @@ def _ingest_enums(lldb) -> None:
 
 # ---------- 非纯壳：SB 取数→纯判定→SB 动作（异常携 error.py 3xxx 码） ----------
 
-class SessionError(RuntimeError):
-    """会话原语失败（壳路异常）；码族归 error.py 3xxx，构造期逼显式无默认。"""
-    def __init__(self, code: SessionErrCode, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-    #end def
-#end class
-
 
 def _physical(e: Exception, fallback: SessionErrCode) -> SessionErrCode:
     """异常→粗类码（schedule 同款+业务缺省）：认类型给码，认不出=fallback；
@@ -150,15 +145,27 @@ def _physical(e: Exception, fallback: SessionErrCode) -> SessionErrCode:
 #end def
 
 
-def load_lldb():
-    """定位 lldb python 绑定：plain import → `lldb -P` 给路径再 import。
-    异常面=SessionError 一类；缺省码 NO_LLDB——一切定位失败都是这一个物理事实。"""
+def require_phase(phase: str, allowed: tuple[str, ...], action: str,
+                  code: SessionErrCode) -> SessionError | None:
+    """相位守卫判定（纯）：不当相位=SessionError 当值返回，调用方决定抛或译。"""
+    if phase not in allowed:
+        return SessionError(code, f"cannot {action} in phase {phase!r} "
+                                  f"(expected one of {allowed})")
+    #end if
+    return None
+#end def
+
+
+def load_lldb(lldb_dir: str):
+    """定位 lldb python 绑定：plain import → `lldb_dir/lldb -P` 给路径再 import
+    （不碰 PATH）。异常面=SessionError 一类；缺省码 NO_LLDB——一切定位失败都是
+    这一个物理事实。"""
     global _lldb
     if _lldb is not None:
         return _lldb
     #end if
     try:
-        _lldb = _import_lldb()
+        _lldb = _import_lldb(lldb_dir)
         _ingest_enums(_lldb)
     except Exception as e:
         _lldb = None                            # 回滚半载状态，进程保持可重试
@@ -168,15 +175,21 @@ def load_lldb():
 #end def
 
 
-def _import_lldb():
-    """plain import → `lldb -P` 备援（ImportError=走备援的信号；异常交翻译层）。"""
+def _import_lldb(lldb_dir: str):
+    """plain import → `lldb_dir/lldb -P` 备援（ImportError=走备援的信号；
+    异常交翻译层）。import 成功≠可用：发行版的空命名空间包（dist-packages/lldb
+    零成员）会顶掉真 SWIG 模块——import 后验签枚举常量，缺=视为不通走备援；
+    空壳已占 sys.modules 槽，重导前先踢。备援二进制按参数目录取，不碰 PATH。"""
     try:
         import lldb as mod
-        return mod
+        if hasattr(mod, "eStateStopped"):
+            return mod
+        #end if
     except ImportError:
         pass                                    # 备援信号，非失败
     #end try
-    out = subprocess.run(["lldb", "-P"], capture_output=True, text=True, check=True)
+    exe = os.path.join(lldb_dir, "lldb")
+    out = subprocess.run([exe, "-P"], capture_output=True, text=True, check=True)
     path = out.stdout.strip().splitlines()[-1].strip() if out.stdout.strip() else ""
     if not path:
         raise RuntimeError("lldb -P produced no python path")
@@ -184,6 +197,7 @@ def _import_lldb():
     if path not in sys.path:
         sys.path.insert(0, path)
     #end if
+    sys.modules.pop("lldb", None)               # 空壳让位：缓存不踢，重导拿回的还是它
     import lldb as mod
     return mod
 #end def
@@ -195,15 +209,18 @@ class Session:
     不复用：构造即守门（见模块 docstring）；close 后本进程不再产 Session。
     """
 
-    def __init__(self, target: str, *, debugserver_path: str | None = None) -> None:
+    def __init__(self, target: str, *, debugserver_path: str,
+                 lldb_dir: str) -> None:
+        """target 路径常驻；debugserver_path/lldb_dir=工具链参数（端口面注入，
+        本模块零 PATH/系统目录猜测）。"""
         global _created
         if _created:
             raise SessionError(SessionErrCode.DEBUGGER_EXISTS,
                                "one debugger per process; host reuse silently no-ops on "
-                               "LLDB 22.1.8 — start a fresh process instead")
+                               "LLDB — start a fresh process instead")
         #end if
         try:
-            self.lldb = load_lldb()
+            self.lldb = load_lldb(lldb_dir)
             self.debugserver_path = debugserver_path
             self.dbg = self.lldb.SBDebugger.Create()
             self.dbg.SetAsync(True)
@@ -215,6 +232,8 @@ class Session:
             self.listener = self.lldb.SBListener("cleanroom-session")
             self.process = None
             self.target_path = target
+            self._phase = "entry"               # entry → entry_stopped → stopped（running/dead 随 continue 砖）
+            self._generation = 0                # 世代票据（decision 12）：frame id=generation*1000+index
         except Exception as e:
             _created = True                     # 半初始化的 debugger 也是坑：进程内不许重试
             raise SessionError(_physical(e, SessionErrCode.BAD_TARGET), repr(e)) from e
@@ -225,10 +244,16 @@ class Session:
     def launch(self, ktest: str, *,
                stdout_path: str | None = None,
                stderr_path: str | None = None,
-               timeout: float = 30.0) -> None:
+               timeout: float = 30.0) -> int:
         """起 inferior：KTEST_FILE 单变量最小环境+入口停（对齐 kleeRuntest 契约：
-        环境不设 KTEST_FILE 时运行时会卡 stdin）。入口停没等到=失败。"""
+        环境不设 KTEST_FILE 时运行时会卡 stdin）。入口停没等到=失败。
+        回 inferior pid（端口面 process 事件的 systemProcessId 源）。"""
         try:
+            guard = require_phase(self._phase, ("entry",), "launch",
+                                  SessionErrCode.ALREADY_LAUNCHED)
+            if guard is not None:
+                raise guard
+            #end if
             if not ktest:
                 raise SessionError(SessionErrCode.BAD_ARGS, "ktest path required")
             #end if
@@ -259,6 +284,8 @@ class Session:
                 raise SessionError(SessionErrCode.ENTRY_NOT_STOPPED,
                                    f"entry wait landed in {state!r}")
             #end if
+            self._phase = "entry_stopped"       # 入口停已到手（静默：上报归 config_done）
+            return int(self.process.GetProcessID())
         except Exception as e:
             raise SessionError(_physical(e, SessionErrCode.LAUNCH_FAILED), repr(e)) from e
         #end try
@@ -271,6 +298,64 @@ class Session:
         except Exception as e:
             raise SessionError(_physical(e, SessionErrCode.RESUME_FAILED), repr(e)) from e
         #end try
+    #end def
+
+    def threads(self) -> list[dict]:
+        """线程清单（单线程契约取 thread 0；process 在即可，无相位守卫）。
+        SB 取数不包（裸崩=bug 按家法炸穿，wait_state/close 同款）。"""
+        thread = self.process.GetThreadAtIndex(0)
+        tid = int(thread.GetThreadID())
+        name = thread.GetName() or f"thread-{tid}"
+        return [{"id": tid, "name": name}]
+    #end def
+
+    def stack_trace(self, thread_id: int, levels: int) -> dict:
+        """栈帧（世代票据：id=generation*1000+index）。守卫与线程存在性在此判定，
+        帧取数不包（家法同上）。"""
+        guard = require_phase(self._phase, ("stopped", "entry_stopped"),
+                              "read the stack", SessionErrCode.NOT_STOPPED)
+        if guard is not None:
+            raise guard
+        #end if
+        thread = self.process.GetThreadByID(int(thread_id))
+        if not thread.IsValid():
+            raise SessionError(SessionErrCode.NO_THREAD,
+                               f"no thread with id {thread_id}")
+        #end if
+        total = thread.GetNumFrames()
+        frames = []
+        for index in range(min(max(int(levels), 1), total)):
+            frame = thread.GetFrameAtIndex(index)
+            name = frame.GetFunctionName() or f"0x{int(frame.GetPC()):x}"
+            line = column = 0
+            path = ""
+            entry = frame.GetLineEntry()
+            if entry.IsValid():
+                line = int(entry.GetLine())
+                column = int(entry.GetColumn())
+                filespec = entry.GetFileSpec()
+                if filespec.IsValid():
+                    path = filespec.fullpath or filespec.GetFilename() or ""
+                #end if
+            #end if
+            frames.append({"id": self._generation * 1000 + index, "name": name,
+                           "line": line, "column": column, "path": path})
+        #end for
+        return {"stack_frames": frames, "total_frames": total}
+    #end def
+
+    def report_entry_stop(self) -> dict:
+        """config_done 原语：入口停上报（entry_stopped→stopped），回 stopped 事件 params。
+        thread_id=thread 0 的真 SB id（单线程契约；stopped 线程选取随 continue 砖细化）。"""
+        guard = require_phase(self._phase, ("entry_stopped",),
+                              "finish configuration", SessionErrCode.NOT_LAUNCHED)
+        if guard is not None:
+            raise guard
+        #end if
+        self._phase = "stopped"
+        thread = self.process.GetThreadAtIndex(0)
+        return {"reason": "entry", "thread_id": int(thread.GetThreadID()),
+                "all_threads_stopped": True}
     #end def
 
     def wait_state(self, timeout: float = 30.0) -> SessionState:
@@ -319,3 +404,18 @@ class Session:
         self.lldb.SBDebugger.Terminate()
     #end def
 #end class
+
+
+def make_backend(lldb_dir: str, target: str) -> Session:
+    """端口面工厂入口（session.py 插拔册的值）：lldb_dir=工具链目录参数
+    （lldb+lldb-server 同册；不读 PATH、不猜系统目录——2026-10-20 用户裁），
+    target=被调试靶路径。debugserver 发现只在给定目录内做（纯查
+    find_lldb_server），结果经构造参数注入=LLDB 消费唯一通道
+    （LLDB_DEBUGSERVER_PATH 赋值在 launch）。"""
+    found = find_lldb_server([lldb_dir])
+    if not isinstance(found, ServerFound):
+        raise SessionError(SessionErrCode.NO_LLDB_SERVER,
+                           f"{found.detail} (lldb_dir={lldb_dir!r})")
+    #end if
+    return Session(target, debugserver_path=found.path, lldb_dir=lldb_dir)
+#end def

@@ -1,19 +1,57 @@
 #!/usr/bin/env python3
-"""session.py — 桩：交互式回放会话的子进程肉身（进程即会话，真逻辑后续填，本文件原地演化）。
+"""session.py — 会话子进程（端口面）：wire 协议+命令派发+后端插拔。
 
-形状源=原 src/symrepl/dap/service.py:28-34（三消息）+:94（pong 形状）。
-砖1 只需三件事：ping 探活（回显 id）/ stdin-EOF exit0（父死信号，decision 8
-对偶）/ 坏帧 exit3（no-resync 对齐 :40-43）。
+进程即会话（ADR "one child per session"，进程生死=会话生死）。
+线形状源=原 src/symrepl/dap/service.py:28-34（三消息）+:94（pong 形状）。
 铁律：线形状不自造——探针钉死真形，桩对真分歧进不来。
+调试器知识零入册：本模块只说 DebugBackend 原语语汇，具体引擎住
+*_backend.py（插拔册+工厂，2026-10-20 用户裁：session 不变、后端可换）。
 """
 import argparse
+import contextlib
 import json
 import os
 import sys
+from typing import Protocol
 
 from childproto import VERSION
+from error import SessionError, SessionErrCode
 
-_phase = "entry"   # 桩内相位：launch→entry_stopped（静默），config_done→stopped；running 随 continue 砖再入册
+BACKENDS = {"lldb": "lldb_backend"}   # 插拔册：调试器名→适配器模块；加后端=加模块+一行
+_backend_name = "lldb"                # main() 按 --backend 改写
+_lldb_dir = ""                        # 工具链目录（lldb+lldb-server 同册）；main() 按 --lldb-dir 改写
+_backend = None                       # 进程级单实例（后端构造期自带守门）
+
+
+class DebugBackend(Protocol):
+    """后端孔位（结构性满足：适配器不 import 本类，零循环）。
+    停读面原语；continue_/wait_state/exit_code 随 continue 砖入册。"""
+
+    def launch(self, ktest: str) -> int:
+        """起 inferior 至入口停，回 inferior pid。"""
+        ...
+    #end def
+
+    def report_entry_stop(self) -> dict:
+        """config_done：入口停上报（entry_stopped→stopped），回 stopped 事件 params。"""
+        ...
+    #end def
+
+    def threads(self) -> list[dict]:
+        """线程清单（单线程契约）。"""
+        ...
+    #end def
+
+    def stack_trace(self, thread_id: int, levels: int) -> dict:
+        """栈帧（世代票据 frame id）。"""
+        ...
+    #end def
+
+    def close(self) -> None:
+        """收场拆除（inferior 随后端语义处置）。"""
+        ...
+    #end def
+#end class
 
 
 def read_frame(read, buf: bytes):
@@ -48,65 +86,134 @@ def send(protocol_out, obj: dict) -> None:
 #end def
 
 
+def _reply_err(protocol_out, msg: dict, code: str, message: str) -> None:
+    """线错误应答：码族=字符串（桩码族 "bad_request"/"no_thread" 同形；
+    SessionError 码进线时取 name.lower() 串）。"""
+    send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
+                        "error": {"code": code, "message": message}})
+#end def
+
+
+def _run(protocol_out, msg: dict, fn):
+    """原语调用统一壳：SessionError→wire 错误，成→ok+result 单帧。"""
+    try:
+        result = fn()
+    except SessionError as e:
+        _reply_err(protocol_out, msg, e.code.name.lower(), e.message)
+        return
+    #end try
+    send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
+                        "result": result or {}})
+#end def
+
+
+def _ensure_backend(params: dict):
+    """工厂+单实例：懒 import（ping/握手路零后端依赖）；lldb_dir/target=端口面注入。"""
+    global _backend
+    if _backend is None:
+        import importlib
+        mod = importlib.import_module(BACKENDS[_backend_name])
+        _backend = mod.make_backend(_lldb_dir, params["target"])
+    #end if
+    return _backend
+#end def
+
+
+def _backend_ready():
+    """取后端实例；launch 前来取=NOT_LAUNCHED（协议 S 门挡不到的防御）。"""
+    if _backend is None:
+        raise SessionError(SessionErrCode.NOT_LAUNCHED, "no session in this process")
+    #end if
+    return _backend
+#end def
+
+
 def handle(protocol_out, msg: dict) -> None:
-    global _phase
     cmd = msg.get("cmd")
     if cmd == "ping":
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
                             "result": {"pong": True, "service_version": VERSION}})
     elif cmd == "launch":
-        # 砖2：接单确认（真回放引擎未填，原地演化）。形状对齐参考 _cmd_launch（result.pid）。
-        # pid=本进程真 pid（砖2 先验④代码先行裁）：探针钉形状不钉值。
-        _phase = "entry_stopped"          # 入口停静默相位（对齐参考 stopOnEntry=True 路）
-        send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
-                            "result": {"pid": os.getpid()}})
+        _launch(protocol_out, msg)
     elif cmd == "config_done":
-        # 砖3：应答后吐 stopped 事件（模拟跑到入口即停；真引擎未填，原地演化）。
-        # params 用执行面词法（thread_id/all_threads_stopped），翻 DAP 词法是父侧的活。
-        _phase = "stopped"
-        send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True, "result": {}})
-        send(protocol_out, {"type": "event", "event": "stopped",
-                            "params": {"reason": "entry", "thread_id": 1,
-                                       "all_threads_stopped": True}})
+        _config_done(protocol_out, msg)
     elif cmd == "threads":
-        # 横向首发：单线程契约的假数据（真 inferior 归引擎线），形状对齐参考 session.threads。
-        send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
-                            "result": {"threads": [{"id": 1, "name": "thread-1"}]}})
+        _run(protocol_out, msg, lambda: {"threads": _backend_ready().threads()})
     elif cmd == "stack_trace":
-        # 横向第二条：相位守卫+假帧单线程。守卫序照参考 service.session：类型哨→相位→线程存在。
-        thread_id = msg.get("params", {}).get("thread_id", 0)
-        if not isinstance(thread_id, int) or isinstance(thread_id, bool):
-            # bool 是 int 子类，isinstance(True, int)=True：必须显式排除
-            send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
-                                "error": {"code": "bad_request",
-                                          "message": "thread_id must be an integer"}})
-        elif _phase not in ("stopped", "entry_stopped"):
-            send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
-                                "error": {"code": "not_stopped",
-                                          "message": f"cannot read the stack in phase {_phase!r}"}})
-        elif thread_id != 1:
-            send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
-                                "error": {"code": "no_thread",
-                                          "message": f"no thread with id {thread_id}"}})
-        else:
-            send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True,
-                                "result": {"stack_frames": [{"id": 1000, "name": "main",
-                                                             "line": 4, "column": 5,
-                                                             "path": "get_sign.c"}],
-                                           "total_frames": 1}})
-        #end if
+        _stack_trace(protocol_out, msg)
     else:
         send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": False,
                             "error": {"code": "unknown_command",
-                                      "message": f"stub: {cmd!r}"}})
+                                      "message": f"unknown command {cmd!r}"}})
+    #end if
+#end def
+
+
+def _launch(protocol_out, msg: dict) -> None:
+    params = msg.get("params") or {}
+    for key in ("ktest", "target"):
+        v = params.get(key)
+        if not isinstance(v, str) or not v:
+            _reply_err(protocol_out, msg, "bad_request",
+                       f"launch requires a '{key}' path string")
+            return
+        #end if
+    #end for
+    _run(protocol_out, msg,
+         lambda: {"pid": _ensure_backend(params).launch(params["ktest"])})
+#end def
+
+
+def _config_done(protocol_out, msg: dict) -> None:
+    try:
+        stop = _backend_ready().report_entry_stop()
+    except SessionError as e:
+        _reply_err(protocol_out, msg, e.code.name.lower(), e.message)
+        return
+    #end try
+    send(protocol_out, {"type": "response", "id": msg.get("id"), "ok": True, "result": {}})
+    send(protocol_out, {"type": "event", "event": "stopped", "params": stop})
+#end def
+
+
+def _stack_trace(protocol_out, msg: dict) -> None:
+    params = msg.get("params") or {}
+    thread_id = params.get("thread_id", 0)
+    if not isinstance(thread_id, int) or isinstance(thread_id, bool):
+        # bool 是 int 子类（isinstance(True, int)=True），必须显式排除
+        _reply_err(protocol_out, msg, "bad_request", "thread_id must be an integer")
+        return
+    #end if
+    levels = params.get("levels", 20)
+    if not isinstance(levels, int) or isinstance(levels, bool) or levels < 1:
+        levels = 20                            # 坏值静默缺省（参考同款宽容）
+    #end if
+    _run(protocol_out, msg, lambda: _backend_ready().stack_trace(thread_id, levels))
+#end def
+
+
+def _shutdown_backend() -> None:
+    """收场尽力而为：close 崩不遮退出码（inferior 处置语义在后端 close 内）。"""
+    global _backend
+    if _backend is not None:
+        with contextlib.suppress(Exception):
+            _backend.close()
+        #end with
+        _backend = None
     #end if
 #end def
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="stub-session")
+    global _backend_name, _lldb_dir
+    parser = argparse.ArgumentParser(prog="session")
     parser.add_argument("--log", default=os.devnull, metavar="PATH")
+    parser.add_argument("--backend", choices=sorted(BACKENDS), default="lldb")
+    parser.add_argument("--lldb-dir", required=True, metavar="DIR",
+                        help="toolchain dir containing lldb and lldb-server")
     args = parser.parse_args()
+    _backend_name = args.backend
+    _lldb_dir = args.lldb_dir
 
     protocol_out = sys.stdout.buffer          # hygiene 同真 service（:401-406）：先抓 fd1 再改道
     stdin_read = sys.stdin.buffer.read1       # type: ignore[attr-defined]  # 运行时是 BufferedReader（真 service :109 同款）
@@ -117,9 +224,11 @@ def main() -> int:
             try:
                 msg, buf = read_frame(stdin_read, buf)
             except Exception:
+                _shutdown_backend()
                 return 3                      # 坏帧 no-resync（对齐真 service :40-43）
             #end try
             if msg is None:
+                _shutdown_backend()
                 return 0                      # stdin-EOF：父死信号 → 干净自杀（:38-39）
             #end if
             handle(protocol_out, msg)

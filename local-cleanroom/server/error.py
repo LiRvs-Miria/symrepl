@@ -20,7 +20,7 @@ class InternalErrCode(IntEnum):
     UPSTREAM_REFUSED = 2002
 #end class
 
-# 执行面错误码（lldb_session 壳路异常用；纯核错误当值返回不经此）
+# 执行面错误码（调试器后端适配器壳路异常用；纯核错误当值返回不经此）
 class SessionErrCode(IntEnum):
     DEBUGGER_EXISTS = 3001     # 单进程单 debugger 契约（复用 no-op 坑）
     BAD_TARGET = 3002
@@ -32,6 +32,20 @@ class SessionErrCode(IntEnum):
     NO_LLDB_SERVER = 3008
     BAD_ARGS = 3009
     RESUME_FAILED = 3010
+    NOT_STOPPED = 3011         # 相位守卫：该操作要求 stopped/entry_stopped
+    NOT_LAUNCHED = 3012        # 相位守卫：该操作要求 entry_stopped
+    NO_THREAD = 3013           # 线程号不存在（GetThreadByID 无效）
+    ALREADY_LAUNCHED = 3014    # 相位守卫：该操作要求 launch 前（参考 already_launched 同款）
+#end class
+
+class SessionError(RuntimeError):
+    """调试器后端原语失败（壳路异常）；码族 SessionErrCode，构造期逼显式无默认。
+    端口面（session.py）捕获译成 wire 错误；适配器内当值抛出。"""
+    def __init__(self, code: SessionErrCode, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+    #end def
 #end class
 
 class ProtoError(NamedTuple):

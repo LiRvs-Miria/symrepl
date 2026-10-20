@@ -52,30 +52,22 @@ def run_one(ktest_str: str) -> None:
     结果作为启动参数注入 Session——模块内零环境发现。
     """
     sys.path.insert(0, str(HERE.parent / "server"))
-    import glob
     import shutil
     import tempfile
-    import lldb_session as ls
+    import lldb_backend as ls
 
-    dirs = []
+    # 端口面参数化（2026-10-20 用户裁）：工具链目录由操作方显式给，零 PATH 猜测。
+    # 网自身=操作方：here 解析一次真目录，发现逻辑照走 find_lldb_server（纯查被测件）。
     which = shutil.which("lldb")
-    if which:
-        dirs.append(os.path.dirname(os.path.realpath(which)))
-    #end if
-    dirs.extend(sorted(glob.glob("/usr/lib/llvm-*/bin"), reverse=True))
-    override = os.environ.get(ls.DEBUG_SERVER_ENV)
-    if override:
-        server = override
-    else:
-        found = ls.find_lldb_server(dirs)
-        if not isinstance(found, ls.ServerFound):
-            raise ls.SessionError(ls.SessionErrCode.NO_LLDB_SERVER, found.detail)
-        #end if
-        server = found.path
+    assert which is not None, "probe harness: lldb not found — operator must provide toolchain"
+    lldb_dir = os.path.dirname(os.path.realpath(which))
+    found = ls.find_lldb_server([lldb_dir])
+    if not isinstance(found, ls.ServerFound):
+        raise ls.SessionError(ls.SessionErrCode.NO_LLDB_SERVER, found.detail)
     #end if
 
     with tempfile.TemporaryDirectory() as tmp:
-        s = ls.Session(TARGET, debugserver_path=server)
+        s = ls.Session(TARGET, debugserver_path=found.path, lldb_dir=lldb_dir)
         s.launch(ktest_str, stdout_path=os.path.join(tmp, "out"),
                  stderr_path=os.path.join(tmp, "err"))
         s.continue_()
