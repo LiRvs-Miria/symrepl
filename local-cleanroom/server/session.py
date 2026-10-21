@@ -29,8 +29,11 @@ class DebugBackend(Protocol):
     """后端孔位（结构性满足：适配器不 import 本类，零循环）。
     停读面原语；continue_/wait_state/exit_code 随 continue 砖入册。"""
 
-    def launch(self, ktest: str) -> int:
-        """起 inferior 至入口停，回 inferior pid。"""
+    def launch(self, ktest: str, *, scope: str | None = None,
+               sym_objects: list[dict] | None = None) -> int:
+        """起 inferior 至入口停，回 inferior pid。scope=branch-trace 插桩范围
+        （可选；None=不插桩）。sym_objects=ktest 对象（父面已解析，name+data_hex
+        结构化下发——backend 零 ktest 文件 I/O）。"""
         ...
     #end def
 
@@ -184,8 +187,30 @@ def _launch(protocol_out, msg: dict) -> None:
             return
         #end if
     #end for
+    scope = params.get("scope")
+    if scope is not None and not isinstance(scope, str):
+        _reply_err(protocol_out, msg, "bad_request",
+                   "launch scope must be a string when present")
+        return
+    #end if
+    sym_objects = params.get("sym_objects")
+    if sym_objects is not None:
+        ok = (isinstance(sym_objects, list)
+              and all(isinstance(o, dict)
+                      and isinstance(o.get("name"), str)
+                      and isinstance(o.get("data_hex"), str)
+                      for o in sym_objects))
+        if not ok:
+            _reply_err(protocol_out, msg, "bad_request",
+                       "launch sym_objects must be a list of "
+                       "{name, data_hex} string pairs")
+            return
+        #end if
+    #end if
     _run(protocol_out, msg,
-         lambda: {"pid": _ensure_backend(params).launch(params["ktest"])})
+         lambda: {"pid": _ensure_backend(params).launch(params["ktest"],
+                                                        scope=scope,
+                                                        sym_objects=sym_objects)})
 #end def
 
 

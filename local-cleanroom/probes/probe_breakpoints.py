@@ -228,6 +228,14 @@ def breakpoints_chain():
         code = p.wait(timeout=10)
         check(name + ": 会话毕 exit=0", code == 0)
         check(name + ": 无孤儿 inferior/lldb-server", no_orphans())
+        if fails:                                # 失败取证：server 侧尾巴倾倒（flaky 排障）
+            try:
+                print("---- server tail (forensics) ----")
+                print(p.stdout.read()[-2000:] if p.stdout else "(no pipe)")
+            except Exception as e:
+                print(f"(forensics unavailable: {e!r})")
+            #end try
+        #end if
     finally:
         if p.poll() is None:
             p.terminate(); p.wait(timeout=5)

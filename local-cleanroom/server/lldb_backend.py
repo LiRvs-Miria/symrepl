@@ -25,11 +25,18 @@ import os
 import subprocess
 import sys
 from enum import Enum
+from pathlib import Path
 from typing import NamedTuple, assert_never
 
 from error import SessionErrCode, SessionError
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "replay"))
+from branches import is_conditional            # E2 识别代数（本砖首消费点）
+
 DEBUG_SERVER_ENV = "LLDB_DEBUGSERVER_PATH"    # LLDB 的消费通道名（启动层引用）
+
+_INVALID_LOAD_ADDR = 0xFFFFFFFFFFFFFFFF       # M1 规格同款：未解析载入地址哨兵
+_MAX_SITES = 5000                             # 插桩滥用守阀（M1 规格同款）
 
 _lldb = None              # 进程内缓存（load 一次）
 _created = False          # 单进程单 debugger 的守门旗
@@ -250,19 +257,25 @@ class Session:
             self._var_refs = {}                 # 变量引用账本（适配器私有）：ref→(generation, frame_index)
             self._ref_counter = 0               # 引用计数器：ref=generation*100000+counter（第二 id 空间）
             self._own_breakpoint_ids: list[int] = []   # 自有断点 id 表（全量替换凭册删旧）
+            self._scope: str | None = None      # branch-trace 插桩范围（launch 可选参数）
+            self._sym_objects: tuple[tuple[str, bytes], ...] = ()  # ktest 对象（父面解析下发，零文件 I/O）
+            self._trace_nodes: list[dict] = []  # actual 轨迹节点（断点命中据实记录，零处理）
         except Exception as e:
             _created = True                     # 半初始化的 debugger 也是坑：进程内不许重试
             raise SessionError(_physical(e, SessionErrCode.BAD_TARGET), repr(e)) from e
         #end try
         _created = True
     #end def
-
-    def launch(self, ktest: str, *,
+    def launch(self, ktest: str, *, scope: str | None = None,
+               sym_objects: list[dict] | None = None,
                stdout_path: str | None = None,
                stderr_path: str | None = None,
                timeout: float = 30.0) -> int:
         """起 inferior：KTEST_FILE 单变量最小环境+入口停（对齐 kleeRuntest 契约：
         环境不设 KTEST_FILE 时运行时会卡 stdin）。入口停没等到=失败。
+        scope=branch-trace 插桩范围（"module"或逗号分隔函数名；None=不插桩）。
+        sym_objects=ktest 对象（父面已解析，{name, data_hex}；hex 坏=BAD_ARGS——
+        本模块零 ktest 文件 I/O，对账字节以父面校验过的那份为准）。
         回 inferior pid（端口面 process 事件的 systemProcessId 源）。"""
         try:
             guard = require_phase(self._phase, ("entry",), "launch",
@@ -273,6 +286,17 @@ class Session:
             if not ktest:
                 raise SessionError(SessionErrCode.BAD_ARGS, "ktest path required")
             #end if
+            self._scope = scope or None
+            objects: list[tuple[str, bytes]] = []
+            for o in (sym_objects or ()):
+                try:
+                    objects.append((o["name"], bytes.fromhex(o["data_hex"])))
+                except (KeyError, ValueError) as e:
+                    raise SessionError(SessionErrCode.BAD_ARGS,
+                                       f"bad sym object {o.get('name')!r}: {e!r}") from e
+                #end try
+            #end for
+            self._sym_objects = tuple(objects)
             if self.debugserver_path:
                 # LLDB 消费该配置的唯一通道；参数驱动的单点赋值（发现归启动层）
                 os.environ[DEBUG_SERVER_ENV] = self.debugserver_path
@@ -358,18 +382,70 @@ class Session:
                     if bp_ids:
                         params["breakpoint_ids"] = bp_ids
                     #end if
+                    if reason == "breakpoint":   # 记录点=断点命中（actual 定义；入口停非命中不记）
+                        self._trace_nodes.append(
+                            self._capture_node(thread, len(self._trace_nodes) + 1))
+                    #end if
                     events.append({"event": "stopped", "params": params})
                 case Accept(state=KnownState.EXITED) | Accept(state=KnownState.CRASHED):
                     code = int(self.process.GetExitStatus())
                     self._phase = "dead"
-                    # 只发执行面事实 exited；terminated 的 DAP 惯例展开归父面翻译（单源）
-                    events.append({"event": "exited", "params": {"exit_code": code}})
+                    # 只发执行面事实 exited；terminated 的 DAP 惯例展开归父面翻译（单源）。
+                    # branch tracing 启用（scope 在册）才附报告——未启用会话零增帧。
+                    params: dict = {"exit_code": code}
+                    if self._scope is not None:
+                        params["trace_report"] = {"text": self._render_trace(),
+                                                  "nodes": self._trace_nodes}
+                    #end if
+                    events.append({"event": "exited", "params": params})
                     break                       # 终态：不再产事件
                 case _:
                     pass                        # DETACHED/Unknown：留痕丢弃
             #end match
         #end while
         return events
+    #end def
+
+    def _capture_node(self, thread, order: int) -> dict:
+        """actual 节点（断点命中据实，零处理）：pc/function/mnemonic/调用栈/符号值。
+        一致性注记（match/mismatch/ambiguous/unmatched）=派生层，原始值始终如实。"""
+        frame = thread.GetFrameAtIndex(0)
+        pc = int(frame.GetPC())
+        function = frame.GetFunctionName() or f"0x{pc:x}"
+        mnemonic = ""
+        instructions = self.target.ReadInstructions(frame.GetPCAddress(), 1)
+        if instructions.GetSize() > 0:
+            mnemonic = instructions.GetInstructionAtIndex(0).GetMnemonic(self.target) or ""
+        #end if
+        call_stack = []
+        for i in range(thread.GetNumFrames()):
+            f = thread.GetFrameAtIndex(i)
+            call_stack.append(f.GetFunctionName() or f"0x{int(f.GetPC()):x}")
+        #end for
+        symbols = []
+        for name, data in self._sym_objects:
+            var = frame.FindVariable(name)
+            if not var.IsValid():
+                symbols.append({"name": name, "annotation": "unmatched",
+                                "detail": "no local variable with this name"})
+                continue
+            #end if
+            value = var.GetValue() or var.GetSummary() or ""
+            sb_data = var.GetData()
+            size = int(sb_data.GetByteSize())
+            raw = bytes(sb_data.uint8) if size else b""
+            if size == len(data) and raw == data:
+                annotation = "match"
+            elif size == len(data):
+                annotation = "mismatch"
+            else:
+                annotation = "ambiguous"
+            #end if
+            symbols.append({"name": name, "value": value, "annotation": annotation,
+                            "ktest_hex": data.hex()})
+        #end for
+        return {"order": order, "address": pc, "function": function,
+                "mnemonic": mnemonic, "call_stack": call_stack, "symbols": symbols}
     #end def
 
     def threads(self) -> list[dict]:
@@ -512,16 +588,68 @@ class Session:
 
     def report_entry_stop(self) -> dict:
         """config_done 原语：入口停上报（entry_stopped→stopped），回 stopped 事件 params。
-        thread_id=thread 0 的真 SB id（单线程契约；stopped 线程选取随 continue 砖细化）。"""
+        thread_id=thread 0 的真 SB id（单线程契约；stopped 线程选取随 continue 砖细化）。
+        scope 在册=先自动插桩（入口停内做——PIE 载入地址此时才解析），插桩失败=大声炸。"""
         guard = require_phase(self._phase, ("entry_stopped",),
                               "finish configuration", SessionErrCode.NOT_LAUNCHED)
         if guard is not None:
             raise guard
         #end if
+        if self._scope:
+            self._instrument_scope()
+        #end if
         self._phase = "stopped"
         thread = self.process.GetThreadAtIndex(0)
         return {"reason": "entry", "thread_id": int(thread.GetThreadID()),
                 "all_threads_stopped": True}
+    #end def
+
+    def _instrument_scope(self) -> None:
+        """branch-trace 自动插桩：预扫描主模块 code symbols 反汇编，
+        is_conditional（E2 识别代数，x86 单表——kind 权威路已裁掉）筛条件站点，
+        按载入地址设断并记册（凭册与客户端断点同册——后续 setBreakpoints
+        全量替换会清它，MVP 接受）。站点数超阀=scope 滥用，大声失败（M1 规格）。"""
+        wanted = (None if self._scope == "module"
+                  else {n.strip() for n in self._scope.split(",") if n.strip()})
+        module = self.target.GetModuleAtIndex(0)
+        addresses: list[int] = []
+        seen: set[int] = set()
+        for i in range(module.GetNumSymbols()):
+            symbol = module.GetSymbolAtIndex(i)
+            if symbol.GetType() != int(self.lldb.eSymbolTypeCode):
+                continue
+            #end if
+            name = symbol.GetName() or ""
+            if wanted is not None and name not in wanted:
+                continue
+            #end if
+            instructions = symbol.GetInstructions(self.target)
+            for k in range(instructions.GetSize()):
+                ins = instructions.GetInstructionAtIndex(k)
+                if not is_conditional(ins.GetMnemonic(self.target)):
+                    continue
+                #end if
+                address = int(ins.GetAddress().GetLoadAddress(self.target))
+                if address in (0, _INVALID_LOAD_ADDR) or address in seen:
+                    continue
+                #end if
+                seen.add(address)
+                addresses.append(address)
+            #end for
+        #end for
+        if len(addresses) > _MAX_SITES:
+            raise SessionError(SessionErrCode.BAD_ARGS,
+                               f"scope {self._scope!r} instruments "
+                               f"{len(addresses)} sites (>{_MAX_SITES}); "
+                               "narrow the scope")
+        #end if
+        addresses.sort()
+        for address in addresses:
+            bp = self.target.BreakpointCreateByAddress(address)
+            if bp.IsValid():
+                self._own_breakpoint_ids.append(int(bp.GetID()))
+            #end if
+        #end for
     #end def
 
     def _read_event(self, ev) -> tuple[bool, int | None, int]:
@@ -559,6 +687,23 @@ class Session:
                     assert_never(verdict)             # 穷尽性：加员忘接=大声失败
             #end match
         #end while
+    #end def
+
+    def _render_trace(self) -> str:
+        """轨迹报告文本（据实序列+节点详情；一致性注记=派生层标注，非记录点处理）。"""
+        lines = [f"branch trace: scope={self._scope!r}, "
+                 f"{len(self._trace_nodes)} hit(s) in execution order:"]
+        for node in self._trace_nodes:
+            line = (f"  #{node['order']} 0x{node['address']:x} "
+                    f"<{node['function']}> {node['mnemonic']}".rstrip())
+            syms = "  ".join(f"{s['name']}={s.get('value', '?')}"
+                             f"[{s['annotation']}]" for s in node["symbols"])
+            if syms:
+                line += f"  {syms}"
+            #end if
+            lines.append(line)
+        #end for
+        return "\n".join(lines)
     #end def
 
     def exit_code(self) -> int:

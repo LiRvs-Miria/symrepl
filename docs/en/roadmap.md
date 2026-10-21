@@ -127,6 +127,43 @@ Known risks (planning pass 2026-10-05):
 - **The one-shot CLI path stays frozen**; migrating it onto the service
   child is explicitly out of M2 scope (revisit at M3).
 
+## branchTrace reshape, cuts and deferrals (2026-10-21, rulings during
+## the cleanroom rebuild)
+
+> Since 2026-10-16 the cleanroom rebuild re-implements the M2 service
+> surface; the rebuild made the following substantive rulings on the
+> original M2 slices (rationale in
+> `local-cleanroom/server/design-notes.md`):
+
+- **stepping deferred** (the original M2-d keeps its slot, to be
+  implemented after the M2 wrap-up): the replay core = pre-scan
+  instrumentation + bp + continue driving + report production;
+  interactive stepping is the **user's debugging strategy after a
+  breakpoint stop** and is not load-bearing for the current phase.
+  DAP house rule "advertise only what exists" — unimplemented means
+  unadvertised. The M2-a `SendAsyncInterrupt` spike results stay
+  archived; resuming this work needs a long-running target fixture
+  (get_sign exits too fast to expose a running window).
+- **pause/terminate not implemented for now** (part of the original
+  M2-b1): teardown = the single `disconnect` path, which also covers
+  pause's rescue role; `terminate` replies `unknown` if it arrives.
+  Revisit when a real need shows up.
+- **`replay.branchTrace` command cut** (part of the original M2-c):
+  the trace report became an automatic end-of-session summary pushed
+  via `output` (purely passive, no new command); branchTrace is
+  reshaped into **pre-scan guided replay** — the pre-scanned site set
+  (`is_conditional`) is the target side's sole duty (the basis for
+  placing breakpoints); the actual side is recorded verbatim at each
+  breakpoint hit (pc/function/mnemonic/call stack/symbol values); the
+  report contains the path line + per-node details (including
+  consistency annotations of symbol values against the ktest solution
+  samples).
+- **Two-layer verification split**: value consistency (symbol values
+  vs the ktest solution samples) is produced with the replay report;
+  path consistency verification (modeling/solving) is part of M4
+  trace analysis — an independent analysis layer consuming the report
+  (see M4).
+
 ## M3 — LLVM IR / DWARF mapping
 
 - Map path decisions back to IR locations and source lines via DWARF.
@@ -134,6 +171,15 @@ Known risks (planning pass 2026-10-05):
 ## M4 — Analysis overlays
 
 - Coverage and taint overlays on the replay trace.
+- **Path consistency verification** (added 2026-10-21, user ruling):
+  consumes the branchTrace report for path modeling, solving and
+  consistency checking — part of trace analysis. KLEE path constraints
+  are consumed via the public `.kquery` format; if SMT solving would
+  break the "thin bridge / zero-dependency" positioning, it becomes a
+  separate library-dependency project following the ptrfuzz model
+  (to be decided then). The comparison algebra pre-laid inside the
+  replayer (`local-cleanroom/replay/branches.py` `equal`/`match_path`)
+  is consumed by this layer and is not wired into the replay path.
 
 ## Ecosystem
 

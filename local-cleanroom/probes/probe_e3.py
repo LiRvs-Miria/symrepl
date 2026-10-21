@@ -70,6 +70,7 @@ def run_one(ktest_str: str) -> None:
         s = ls.Session(TARGET, debugserver_path=found.path, lldb_dir=lldb_dir)
         s.launch(ktest_str, stdout_path=os.path.join(tmp, "out"),
                  stderr_path=os.path.join(tmp, "err"))
+        s.report_entry_stop()   # config_done 放行（砖3 相位契约：entry_stopped→stopped 后才可 resume）
         s.continue_()
         state = s.wait_state()
         assert state == ls.KnownState.EXITED, state

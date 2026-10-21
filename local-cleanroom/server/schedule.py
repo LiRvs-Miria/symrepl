@@ -23,6 +23,9 @@ from adapter import (Action, Crashed, Done, ForwardRequest, FulfillLaunch, Gone,
                      translate_child_event)
 from childproto import BadChildMsg, ChildEvent, ChildRequest, ChildResponse, parse_child_msg, request_msg
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "replay"))
+from ktest import KtestBad, load as ktest_load   # E1 件（launch 门禁：父面校验+解析一次）
+
 SESSION_SCRIPT = str(Path(__file__).resolve().parent / "session.py")
 
 def log(msg: str) -> None:
@@ -275,13 +278,28 @@ async def run_effect(conn: "ConnState", action: Action) -> Outcome:
         case FulfillLaunch(req):
             child = None
             try:
+                # launch 门禁（原 M2-b1 承诺"ktest 由父进程校验"）：E1 解析器
+                # 校验+解析一次，对象结构化下发——backend 不再自读文件。
+                parsed = ktest_load(req.arguments["ktest"])
+                if isinstance(parsed, KtestBad):
+                    log(f"effect_failed action=FulfillLaunch outcome=Rejected "
+                        f"detail=ktest {parsed.reason.name}: {parsed.detail}")
+                    return Rejected(detail=f"ktest refused: "
+                                           f"{parsed.reason.name}: {parsed.detail}")
+                #end if
+                sym_objects = [{"name": o.name, "data_hex": o.data.hex()}
+                               for o in parsed.objects]
                 child = await spawn_child([sys.executable, SESSION_SCRIPT,
                                            "--backend", conn.backend,
                                            "--lldb-dir", conn.lldb_dir])
                 await child_ping(child)
-                result = await child_request(child, "launch",
-                                             {"ktest": req.arguments["ktest"],
-                                              "target": req.arguments["target"]})
+                launch_params = {"ktest": req.arguments["ktest"],
+                                 "target": req.arguments["target"],
+                                 "sym_objects": sym_objects}
+                if req.arguments.get("scope") is not None:
+                    launch_params["scope"] = req.arguments["scope"]
+                #end if
+                result = await child_request(child, "launch", launch_params)
             except Exception as e:                # 全捕获：收尸无条件；分类归 _physical
                 if child is not None:
                     await child_close(child)      # 半死也收；幂等

@@ -455,3 +455,96 @@ FrameOut = FrameOk(payload: dict) | FrameEof | FrameBad(reason, detail)
 **预埋攻击点**：①params_fn 嵌套提取（source 或缺/breakpoints 项非 dict 过滤）②resolved line 与请求行可能不同（地址回解析）——探针钉 verified+line int 不钉相等 ③GetStopReasonDataAtIndex(0)=bp id（LLDB 约定），data 计数 0 时不得越界 ④断点命中停相与 continue 响应竞争（同 continue 砖，宽容收帧）⑤reference 简化风险自警：全局单集断点在多源场景丢断点——DAP 客户端逐源调用时后调者清前者（参考即此行为，随迁）。
 
 **落地记录（2026-10-20 当日）**：RED 17 查 10 FAIL（P1-P7 红/P8 绿）→步2 核转录（Command.SET_BREAKPOINTS+宣言行+表一行；P1 转绿，test_core 12/12）→步3 四件套（backend：_own_breakpoint_ids 记册+set_breakpoints 原语+stop_reason_label 纯核推断+_ingest_enums 加 eStopReasonBreakpoint+poll_events STOPPED 臂升级携 breakpoint_ids；child：handle 门牌+_set_breakpoints 类型哨+键重包+Protocol 签名）。**网炸一枚（双键重包）**：契约内部互斥——适配器节写"回 {"breakpoints": [...]}"、child 节写"再重包"，首跑 P2 即炸 AttributeError: 'str' object has no attribute 'get'（父面 body_fn 遍历到内层 dict 的键串）；修=**bare list+child 重包**（家法同构：threads/stack_trace/scopes/variables 全同款），与 f4b1bca 网炸（裸 list 忘重包）成对——键重包家法的两个失败方向（忘包/双包）各实证一回，网各逮一枚。**守卫分布裁决**：类型域（path 非 str/lines 非 list/行内逐项 int·bool·<1）归 child（家法：参考 decode 域迁移）；not_launched（process 无）+空 path 留 backend（参考原位；child 的 _backend_ready 是另一条件——无实例≠无 process，父面 S1/S2 状态门挡不到的防御）。**RED 预测勘误（用户裁照单收）**：契约 RED 预期"P7-P8 绿"不成立——单链下 P3 continue 直通 exit，exited+terminated 在 P3 段已被消费，P7 再 continue 只答 not_stopped；实为 P1-P7 FAIL/P8 绿，GREEN 钉不变。**攻击点了结**：①嵌套提取过滤由 test_core 直测盖（非 dict 项滤除）②resolved line 实测与请求行同（20/21），探针只钉 verified+int 照旧 ③data 计数 0 越界防落 stop_reason_label（count>0 才取 data0）④命中停相与响应竞争照 continue 砖宽容收帧（段定员 3）⑤全局单集简化随迁照旧。**网况**：probe_breakpoints 17 查 ALL PASS+九网回归全绿（test_core 12/12+八探针网）；里程碑：断点命中第二停相全程可观测（launch→入口停→bp 停 L20→替换 L21→bp 停 L21→exit），stale_reference 负路自 continue 砖押后以来首次真实触发（世代票据消费侧闭环）。
+
+## 横向 step 族/terminate（2026-10-21 提议→同日裁决，用户两段式重定性）
+
+**裁决（2026-10-21，用户）**：
+- **next/stepIn/stepOut＝押后，非砍死**：回放最终需要——它们是断点停下后的
+  **用户调试策略**；当前阶段不实现，因非 M2（回放+报告产出）之急。原 M2-d
+  规划地位恢复（排期押后至 M2 收尾后）。
+- **pause/terminate**：当前阶段不实现；disconnect 收场已覆盖（pause 救急面
+  E3 卡 stdin 坑实证过、terminate 答 unknown 1001 可接受）；需求实证出现
+  再议（挂账维持）。
+
+**rationale**：E2 定形后回放核=预扫描插桩+actual 记录+报告——推进靠
+bp+continue；交互步进属调试策略层，不承重 M2。DAP 家法"可选才广告"。
+
+**过程存痕**：契约草+推定钉六枚曾落纸，probe_step.py RED 8 FAIL——真饵链
+bp L20→next→L21→stepIn→get_sign→stepOut→main L21 已验证可观测——随押后
+撤销，链路知识留本档（M2 收尾后按原 M2-d 续）。悬钉"pause 正路真饵（get_sign
+秒退无 running 窗口）"随押后挂起（实现时需长跑靶子）。
+
+**连带**：协议线横向待办只剩 branchTrace（横向收尾，引擎集大成）——与引擎线
+合流；"协议砖/引擎件交替制"随横向收尾自然终结。roadmap en/zh 需编辑性修订
+（M2-d 押后/M2-c 改写/一致性校验归 M4——branchTrace 关账后一并做）。
+
+## branchTrace 预扫描引导回放+报告（2026-10-21 定案，M2 收尾件）
+
+**定案链（用户，2026-10-21 三段演进）**：纯被动汇总（AI 提，废——用户：
+"回放的语义就没了"）→ 引导回放推定（AI 评）→ **target 降格+actual 扩容定案
+（用户）**：
+- **target=预扫描站点集**（E2 is_conditional 首个真消费点）：唯一作用=调试器
+  下断点的依据；记进报告但不参与校验——集合对集合（站点集→断点表），
+  假比对问题消解，M1/ADR-0002 honesty 对齐。
+- **actual=断点命中后据实获取**：pc/function/mnemonic/调用栈/**符号 value**
+  等。记录点=断点命中（入口停非命中，不记——定义使然非剔除），零处理红线
+  照旧（命中什么记什么）。
+- **value 级一致性入报告**：注册符号值 vs ktest 解采样点——局部可验，现在做；
+  **路径级一致性=独立校验工具**（路径建模/求解/分析——归 **M4 轨迹分析叠加
+  层**，方案 A 用户裁；不进回放——"薄桥"定位，SMT 会破零依赖）。报告=两个
+  产品的接口契约。
+- **报告=跑末汇总 output 事件**：路径线（actual 线性序列+索引，重复站点自然
+  呈现环）+节点详情（pc/function/mnemonic/调用栈/符号值+一致性注记）。
+  一致性注记=派生层（记录点仍零处理）；unmatched/ambiguous 如实标注不猜。
+- **无命令面**（纯被动，用户裁）；查询需求挂账。E2 match_path/equal 不接
+  回放（M4 校验工具消费，代数留册）。
+
+**撞到即裁钉**：
+- launch 参数 **scope**（预扫描范围）：现 schema 只有 ktest/target，M2-b1
+  冻结 schema 本有 scope 位——补参；缺省语义随转录裁
+- 报告格式：人读文本 vs 结构化 vs 双形式（推荐双形式——接口契约形状早定；
+  output 文本+body 结构化字段并存）
+- 汇总触发：EXITED/CRASHED 收场点单发；disconnect 中断不汇总（当前阶段）
+- 符号值读取：backend 停相直读（SBFrame 变量+pc 单条反汇编）；ktest 对象名
+  ↔局部变量名匹配=启发式，报告如实标
+
+**网（probe_trace.py，端口 5695，真饵单链）**：launch（携 scope="main,get_sign"）→
+configDone→**自动插桩**（客户端零 setBreakpoints——插桩证据）→continue→停站点1
+（reason=breakpoint）→continue→停站点2→continue→收场段 [resp, output(汇总),
+exited, terminated] 宽容序→文本形状（含 0x 地址行/<get_sign>/节点行）→
+disconnect+孤儿照旧。RED 预期（勘误随 breakpoints 砖先例）：第一次 continue
+直通 exit，exited/terminated 在 P2 段已被消费——RED 实测 4 FAIL（P2/P3/P4a/
+P4b；P4a 红因事件提前消费非生命周期伤），P1/P5 绿。
+
+**落地记录（2026-10-21 当日，AI 小步转录+网逐步验证）**：
+- **步1 预扫描+自动插桩**（configDone 时、入口停内——PIE 载入地址此时才解析）：
+  lldb_backend 懒挂 replay 册路径（cleanroom 内部复用 E2 is_conditional+E1
+  ktest——非 M1 继承）+`_instrument_scope`（M1 规格改写：主模块 code symbols
+  反汇编/单表筛选/地址去重排序/BreakpointCreateByAddress/凭册同册/_MAX_SITES=5000
+  守阀）+launch 增 scope 参数（Protocol/child 类型哨同步）。**网炸一枚（scope
+  在壳被丢）**：launch 单是壳手工造的三行（schedule run_effect），scope 键没上
+  单——裸驱后端全好、DAP 链直通 exit，裸驱/线测分责逮住；修=壳造单补 scope
+  透传。步1 后 1 FAIL（P4b=步3 的活）。
+- **步2 停相记录面**：poll_events STOPPED 臂 reason=breakpoint 即记
+  `_capture_node`（pc/GetFunctionName/pc 单条反汇编 GetMnemonic/调用栈全帧/
+  ktest 对象名↔FindVariable 匹配+字节对账注记 match/mismatch/ambiguous/
+  unmatched——注记=派生层，原始值如实；ktest 解析失败=空集如实不猜）。
+  **匹配启发式现形**：get_sign 帧只有 x，ktest 对象 a=unmatched——据实标注
+  正确行为（定义帧才有对应局部）。
+- **步3 汇总+通道**：`_render_trace`（行式 #序号 0x地址 <函数> 助记符 [符号
+  注记]）+EXITED/CRASHED 臂携 trace_report 载荷（**仅 scope 在册会话附报告
+  ——未启用会话零增帧**）+父面 translate exited 一变三（output 先发=过程输出
+  先于终态告别；body 双形式：output 人读文本+report 结构化节点）。步3 后
+  **probe_trace ALL PASS**。
+- **RED 探针勘误一枚（AI 钉错自收）**：P4b 钉 `<main>`——test3 路径两命中都在
+  get_sign 帧，勘误为 `<get_sign>`（照 breakpoints 砖"RED 勘误照单收"家法）。
+- **回归网两笔记**：①probe_e3 陈旧（launch→continue_ 直连，continue 砖收紧
+  相位守卫后未随网更新、此后未入回归清单）——补 report_entry_stop 放行步，
+  与本刀无关的存量陈旧；②probe_breakpoints 循环语境 flaky 两例（单跑/轻语境
+  全绿，深循环红且形状不一、rr3 server 退出码非 0）——**失败取证入网**
+  （server stdout 尾巴失败即倾倒），取证版全循环 13 网全绿，flaky 根因未坐实
+  挂账盯梢。
+- **网况**：probe_trace ALL PASS+**全循环 13 网回归绿**（含真饵九网+纯网四件）。
+
+**不变量**：记录点零处理（据实红线）；比对不入境（M4 工具）；无新命令；单源
+（child 事实/父面翻译）；未启用会话零增帧；E2 代数不接线（M4 消费）。

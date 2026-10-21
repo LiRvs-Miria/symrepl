@@ -138,6 +138,124 @@ class Manual:
 #end class
 
 
+def wait_event(m, names, timeout=20):
+    """收帧直到事件名命中（途经帧照 show，缓冲接力）；回命中帧。"""
+    m.s.settimeout(timeout)
+    while True:
+        msg, m.buf = recv(m.s, m.buf)
+        show(msg)
+        if msg.get("type") == "event" and msg.get("event") in names:
+            return msg
+        #end if
+    #end while
+#end def
+
+
+def pump(m, timeout=20):
+    """continue 后的事件泵：收帧到 stopped/exited/terminated 命中；output
+    （轨迹报告）即到即印不落袋；响应/杂帧照 show 续收。
+    回 (kind, body, report_body)。"""
+    report = None
+    while True:
+        m.s.settimeout(timeout)
+        msg, m.buf = recv(m.s, m.buf)
+        show(msg)
+        if msg.get("type") != "event":
+            continue                          # 应答先到照 show，继续等事件
+        #end if
+        name, body = msg.get("event"), msg.get("body") or {}
+        if name == "output":
+            report = body
+            print("---- 轨迹报告（output 事件） ----")
+            print(body.get("output") or "")
+            continue
+        #end if
+        if name in ("stopped", "exited", "terminated"):
+            return name, body, report
+        #end if
+    #end while
+#end def
+
+
+def show_stop(m, body, stop_no, pause):
+    """采样点观测（真用户三连：stackTrace→scopes→variables，状态打全）；
+    pause=True 等回车放行（人在环节奏）。"""
+    print(f"== 采样点 #{stop_no} 停驻 ==  reason={body.get('reason')} "
+          f"bp={body.get('hitBreakpointIds')}")
+    tid = body.get("threadId") or 0
+    r = m.req("stackTrace", {"threadId": tid})
+    frames = (r.get("body") or {}).get("stackFrames") or []
+    if frames:
+        f0 = frames[0]
+        print(f"  帧0: {f0.get('name')}  {f0.get('path')}:{f0.get('line')}")
+    #end if
+    frame_id = frames[0].get("id") if frames else 0
+    r = m.req("scopes", {"frameId": frame_id})
+    for sc in (r.get("body") or {}).get("scopes") or []:
+        print(f"  scope {sc.get('name')}:")
+        rv = m.req("variables", {"variablesReference": sc.get("variablesReference")})
+        for v in (rv.get("body") or {}).get("variables") or []:
+            print(f"    {v.get('name')} ({v.get('type')}) = {v.get('value')}")
+        #end for
+    #end for
+    if pause:
+        input("  ……回车放行 ")
+    #end if
+#end def
+
+
+def replay_chain(port=5678, ktest=KT_DEFAULT, target=TG_DEFAULT,
+                 scope="main,get_sign", pause=False, timeout=20):
+    """模拟实际 ktest 回放（真用户视角）：launch（ktest+scope）→逐采样点停驻
+    （每站 stackTrace/scopes/variables 看状态）→收场自动取轨迹报告。
+    pause=True=人在环（每站回车放行）；默认自动走完（脚本 triage 节奏）。"""
+    p = start_server(port)
+    try:
+        m = Manual(port)
+        m.req("initialize", {"adapterId": "symrepl"})
+        m.req("launch", {"ktest": ktest, "target": target, "scope": scope})
+        m.drain("launch 段（process+initialized）")
+        m.req("configurationDone")
+        m.drain("放行段（双帧+入口 stopped）")
+        print(f"== 回放开跑 == ktest={Path(ktest).name} scope={scope!r}")
+
+        stop_no = 0
+        while True:
+            m.req("continue")
+            kind, body, report = pump(m, timeout)
+            if kind == "stopped":
+                stop_no += 1
+                show_stop(m, body, stop_no, pause)
+            elif kind == "exited":
+                print(f"== 收场 == exitCode={body.get('exitCode')}")
+                if report is not None and not report.get("output"):
+                    print("---- 轨迹报告 ----")
+                    print(report.get("text") or "")
+                #end if
+                while True:                   # terminated 收齐才散（output 迟到也接）
+                    kind2, _, rep2 = pump(m, timeout)
+                    if kind2 == "terminated":
+                        break
+                    #end if
+                #end while
+                break
+            else:                             # terminated 先到（异常序）：如实退出循环
+                break
+            #end if
+        #end while
+        m.req("disconnect")
+        m.drain("收场（resp+terminated）")
+        m.close()
+        code = p.wait(timeout=20)
+        print("server exit =", code)
+    finally:
+        if p.poll() is None:
+            p.terminate(); p.wait(timeout=5)
+        #end if
+    #end try
+#end def
+
+
 def manual_chain(port=5678, ktest=KT_DEFAULT, target=TG_DEFAULT):
     """全链代驾：真饵一条龙逐帧打印（起服→init→S1 负路→launch→放行→两步 stackTrace→
     no_thread 负路→disconnect→exit0）。要手动改哪步，把 Manual 用法抄走即可。"""
@@ -178,13 +296,18 @@ def show(m):
 
 if __name__ == "__main__":
     # 手动驱动入口：全矩阵自动跑在 ../probes/。
-    #   一键代驾：python3 dap_client.py [port]
+    #   实际回放模拟：python3 dap_client.py [port] [-p]   （-p=每采样点回车放行）
+    #   旧全链 demo：python3 dap_client.py [port] -m
     #   交互逐帧：python3 -i dap_client.py   然后见下方两行引导
     import sys
-    _port = int(sys.argv[1]) if len(sys.argv) > 1 else 5678
-    if "-i" in sys.argv:
+    args = [a for a in sys.argv[1:] if a in ("-i", "-m", "-p")]
+    _ports = [a for a in sys.argv[1:] if a.isdigit()]
+    _port = int(_ports[0]) if _ports else 5678
+    if "-i" in args:
         print("交互模式：m = Manual(%d) 起手；m.req('initialize', {'adapterId': 'symrepl'}) 逐命令开" % _port)
-    else:
+    elif "-m" in args:
         manual_chain(_port)
+    else:
+        replay_chain(_port, pause=("-p" in args))
     #end if
 #end if

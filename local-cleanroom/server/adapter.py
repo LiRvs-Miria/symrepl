@@ -465,9 +465,19 @@ def translate_child_event(event: str, params: dict | None) -> tuple[Event, ...]:
         return (Event(event="stopped", body=body),)
     #end if
     if event == "exited":
-        # DAP 惯例：terminated 随 exited（参考 server.py:783-789 同款一变二）
-        return (Event(event="exited", body={"exitCode": params.get("exit_code", 0)}),
-                Event(event="terminated", body={}))
+        # 报告随收场事实（child 单源）：output 先发（过程输出先于终态告别），
+        # terminated 随 exited（DAP 惯例一变二；携报告时一变三）
+        report = params.get("trace_report") or {}
+        out: list[Event] = []
+        if report.get("text"):
+            out.append(Event(event="output",
+                             body={"output": report["text"] + "\n",
+                                   "category": "console",
+                                   "report": report.get("nodes") or []}))
+        #end if
+        out.append(Event(event="exited", body={"exitCode": params.get("exit_code", 0)}))
+        out.append(Event(event="terminated", body={}))
+        return tuple(out)
     #end if
     if event == "terminated":
         return (Event(event="terminated", body={}),)
