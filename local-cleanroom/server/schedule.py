@@ -459,14 +459,51 @@ async def main(host: str, port: int, *, backend: str, lldb_dir: str):
 #end def
 
 
+async def amain_stdio(*, backend: str, lldb_dir: str):
+    """stdio transport：DAP 帧走 stdin/stdout（VS Code debugServer 之外的
+    直挂形态）。handle 本身传输无关——读侧接 stdin、写侧接 stdout 即可。
+    信号路=读侧 feed_eof（管道写侧关闭不产生读 EOF，与 socket 不同）。"""
+    loop = asyncio.get_running_loop()
+    conn = ConnState(backend=backend, lldb_dir=lldb_dir)
+
+    reader = asyncio.StreamReader()
+    await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader),
+                                 sys.stdin.buffer)
+    w_transport, w_protocol = await loop.connect_write_pipe(
+        asyncio.streams.FlowControlMixin, sys.stdout.buffer)
+    writer = asyncio.StreamWriter(w_transport, w_protocol, None, loop)
+    log("listening stdio")
+
+    def on_signal_stdio():
+        log("signal_received shutting_down")
+        reader.feed_eof()                     # 读侧 EOF → FrameEof → session_end
+        writer.close()
+    #end def
+    for s in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(s, on_signal_stdio)
+        #end with
+    #end for
+
+    await handle(reader, writer, conn=conn)   # 单"连接"：进程即会话（stdin EOF=收场）
+    return conn.exit_code
+#end def
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="schedule")
     parser.add_argument("port", nargs="?", type=int, default=5678)
+    parser.add_argument("--stdio", action="store_true",
+                        help="DAP over stdin/stdout（忽略 port；单会话）")
     parser.add_argument("--backend", default="lldb",
                         help="debugger backend name（插拔册键）")
     parser.add_argument("--lldb-dir", required=True, metavar="DIR",
                         help="toolchain dir containing lldb and lldb-server")
     _a = parser.parse_args()
+    if _a.stdio:
+        sys.exit(asyncio.run(amain_stdio(backend=_a.backend,
+                                         lldb_dir=_a.lldb_dir)))
+    #end if
     asyncio.run(main("127.0.0.1", _a.port,
                      backend=_a.backend, lldb_dir=_a.lldb_dir))
     # §0 观察点：单栈 127.0.0.1（localhost 双栈会在半绑定失败时拖死全体，2026-10-14 实测）

@@ -1,6 +1,6 @@
 # cleanroom 转正推进状态（立项 2026-10-16：local-cleanroom 替代 src/symrepl/dap/）
 
-> 本文件是会话进度快照（**冻结 2026-10-20**），冷启动从此取活。
+> 本文件是会话进度快照（**冻结 2026-10-21**），冷启动从此取活。
 > 配套：[`local-cleanroom/server/design-notes.md`](local-cleanroom/server/design-notes.md)（设计档案，随码走，含契约/裁决/命名/通道选型/网炸史全记录）、[`../research-survey/plan/ai-independence.md`](../research-survey/plan/ai-independence.md)（承重协议 v1.3，§2.6 决策节律）、[`../research-survey/plan/ai-ledger.md`](../research-survey/plan/ai-ledger.md)（对账账本，追加式）。
 > 前史：phase1（2026-10-12 关账）/ phase2（2026-10-15 收官）的 local-test* 档案已删除（2026-10-16），考古走 git 历史。
 
@@ -38,7 +38,9 @@
 ### 协议线
 - [ ] 砖4 收场路（**押后中**）：disconnect 带 child 拆除（`TearDownChild` 占位员落位）、退出码归类
 - [ ] 砖5 child 死路混沌探针（立场乙：父活快败陪到底）
-- [ ] 收尾清单：stdio 模式、cli.py:151 接线改挂、pytest DAP 面 41 项改挂、ADR 注、原包 dap 四件退役、5c 真逻辑填实、roadmap en/zh 编辑性修订（M2-d stepping 押后/M2-c branchTrace 改写/一致性校验归 M4——branchTrace 关账后一并）
+- [x] stdio 模式（✅ 2026-10-21：schedule `--stdio` flag+`amain_stdio`——handle 传输无关直接接管 stdin/stdout，单"连接"=进程即会话，信号=读侧 feed_eof；probe_stdio 6/6 绿（握手/状态门/真链/收场/stdin-EOF/卫生）+四网回归绿）
+- [x] roadmap en/zh 编辑性修订（✅ 2026-10-21 已随 7ba89f2：branchTrace 重定形/stepping 押后非砍死/一致性校验归 M4）
+- [ ] **归一一步到位（打头项，铸名钉已裁 A 案=replay/algebra 子包）**：local-cleanroom/server 五件包化进 src/symrepl/dap/（顶替原四件，flat import→包内相对）+cleanroom 引擎两件（replay/branches.py+replay/ktest.py 代数）→ src/symrepl/replay/algebra/ 子包（M1 四件原位冻结零碰撞）+cli.py:151 直挂（schedule 增 run(argv) 入口）+原包 dap 四件退役+13 网搬家（SRV_DIR spawn→`-m symrepl.dap.schedule`/`-m symrepl.dap.session`，flat import→包 import）+pytest DAP 面 41 项同批+ADR 注（ADR-0003 附转正记）+5c 断奶收口
 
 ### 引擎线（对账网随件裁：E1 oracle 对账 / E2 起取代无 oracle）
 - [ ] E4 会话编排续刀（continue 砖带事件泵+running 相位+事件流，setBreakpoints 砖带 reason 推断；余：(动作,事件)→SessionState 编洛建模收敛、branchTrace 的 trace_report 输出事件流）——branchTrace 接线时消费 E2 代数（match_path/step/==）
@@ -64,4 +66,4 @@
 
 - 本机：**llvm-22.1.8 全家**（lldb/clang/clang++ 22.1.8，Debian 官方源装；apt 源已由 TUNA 换 USTC——TUNA 缺 llvm-toolchain-22 谱系且 403；无版本名 /usr/bin/{lldb,clang,clang++} 均手指 22；llvm-19 库残留无害）；工具链目录经 `--lldb-dir` 参数显式给（=lldb+lldb-server 同册，**现为 /usr/lib/llvm-22/bin**），服务侧零 PATH 猜测；绑定定位 plain import→`lldb_dir/lldb -P` 备援（dist-packages 空命名空间包坑已修，design-notes E4 节）；无 ~/venvs/symrepl（M1 CLI 若跑需重建）
 - 真靶子：`/tmp/opencode/replay-build/get_sign`（按 tests/conftest.py 配方即建，易失；直跑最小环境基线 test1→0 / test2→1 / test3→255）
-- 探针真饵化（2026-10-20 起：launch/threads/stacktrace/转移表走真 LLDB 会话，依赖本机 lldb 22+靶子；封闭网=framing/childseam/test_core）；端口：转移表 5681 / launch 5683 / threads 5685 / stacktrace 5687；framing 起服自洁 fuser（psmisc 已装）；手动测试入口=client/dap_client.py（Manual 驱动器/一键代驾/-i 交互）
+- 探针真饵化（2026-10-20 起：launch/threads/stacktrace/转移表走真 LLDB 会话，依赖本机 lldb 22+靶子；封闭网=framing/childseam/test_core）；端口：转移表 5681 / launch 5683 / threads 5685 / stacktrace 5687 / continue 5691 / breakpoints 5693 / trace 5695 / stdio 无端口；framing 起服自洁 fuser（psmisc 已装）；手动测试入口=client/dap_client.py（**replay_chain=实际 ktest 回放模拟**/一键代驾/-p 人在环/-i 交互/-m 旧 demo）
