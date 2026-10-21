@@ -1,5 +1,66 @@
 # replay design-notes — 引擎线（回放核）设计档案
 
+## E2 BranchSite 值代数与路径对比（2026-10-21，纯件；契约定稿+落地）
+
+**三答定稿（用户，模糊架构级，2026-10-21）**：
+① BranchSite 形状：**x86 专用**（aarch64 不做）；结构 =（address, function, mnemonic）
+——size/target 不属站点本体；加法代数测到达；路径点 = BranchSite 的 list，
+路径相符（重合）= 逐元素比较。
+② 对比代数：逐元素比较的结果 = 代数等价运算的结果，取值无非**相等/不等/错误**
+——照家法 Expect/Maybe 错误代数（E1 KtestBad 同构：封闭 reason + detail 当值不抛）。
+③ 网钉范围（2026-10-21 定稿）：**无 oracle 对账**——用户裁"我们是要取代原始架构
+和代码，没必要使用原来的"。M1 branches.py/trace.py 连 oracle 臂也不入；
+E2 正确性=纯形状钉 + 后续 E4/branchTrace 真会话网兜底（多网交叉：本刀管形状，
+行为后验）。渲染面不入本刀，随横向 branchTrace 砖。
+
+**转录后果（照①②推定，用户复核）**：
+- 结构无 kind 字段 ⇒ 识别=纯助记符表（x86 单表，小写化）；M1 的
+  GetControlFlowKind 权威路拿掉（x86-only 下两路在本机永不分歧）
+- target 出局 ⇒ `parse_branch_target`/operand 抽取不入境；预扫描纯面=is_conditional
+  单件（x86 表）
+- size 不存储 ⇒ 指令长在用到处供给（站点值不携带）
+
+**定形史（2026-10-21，三轮撞裁，原话在案）**：
+- **第一轮（步 2，两钉）**：+ 吐 int 被打回（"你现在吐出int有点离谱"）→
+  `+ : BranchSite -> int -> BranchSite`；step 混杂形 (site,size,next_addr,run_ended)
+  被打回 → `==(observed, target)` 双站点。
+- **第二轮（步 3，三钉，函数式定形）**：①**纯值不许混方法**——`__add__` 入值
+  类型=OOP 杂质（"如果你觉得不能做成代数结构,你应该直接提出来"）；代数运算一律
+  住模块函数。②**数据可得性模型**：target 侧三字段全知；replay 侧
+  address/function 取自调用栈、mnemonic 取自反汇编（LLDB `SBInstruction.GetMnemonic`
+  可得——用户存疑已答，取值在 E4 壳侧，纯代数不问来源）。③**== 自下而上**：
+  字段各自 ==（int/str 原生）→ 单站点 == = 逐域合取（`equal` 显式铸名）→
+  路径对比 = `map` 高阶逐位；**实际执行只负责往实际 list 记录站点，对比是独立
+  代数**（领域分层锚：记录在壳，对比在纯核）。
+- **随动收敛**：Step/StepResult 枚举退役（元素结果=Bool）；UNOBSERVED 退役
+  （无到达测量即无末点不可观测）→ `PathBad(LENGTH_MISMATCH)`（长度不齐=逐位
+  对比无定义，detail 携两侧长度）；裸停址序列、+ 到达代数出局（现文本用不到，
+  shell 预扫描若需再铸）。
+
+**铸名（撞到随铸，可复议）**：`equal`（单站点 ==）、`match_path`（路径对比）、
+`PathBad/PathBadReason(LENGTH_MISMATCH)`、`MatchOutcome = list[bool] | PathBad`。
+
+**落地记录（2026-10-21 当日）**：RED 12（模块缺位全红基线）→步 1（ADT+识别表）
+4 绿→步 2（+代数/走向三员）5 绿→第一轮两钉打回→改形新钉 RED 7（精准红）→
+12/12→**第二轮三钉打回（函数式定形）**→新钉 RED 8（纯值/equal/match_path 两参/
+PathBadReason，识别四查不动仍绿）→重转录 **12/12 ALL PASS**。**网钉自愈一枚**：
+纯值查 `hasattr("__add__")` 撞 tuple 继承面（NamedTuple 原生拼接语义混淆）——
+修=类自身 `__dict__` + 行为面 `site+int` 必炸 TypeError 双钉。**纯网四件回归绿**
+（probe_ktest/test_core/framing/childseam）；server/ 零 diff，LLDB 六网无风险。
+**网搬运**：from-import 全有全无 → 模块属性访问，小步部分绿可见、缺名不连坐
+（E1 家法微进化）。攻击点了结：归一化/aarch64 拒收/无地址捷径（逐域合取钉死）/
+长度不齐当值/空输入，五枚全由网收口。
+
+**不变量**：零代码继承（本刀 M1 代码完全不入境——取代裁决，E1 的 oracle 臂模式
+对本刀不适用）；**BranchSite 纯值无方法**；== 逐域合取无地址捷径；纯核零 I/O；
+比较域不抛（错误当值）；注释只说代码本身（裁决史归本档）。
+
+**网（probe_branches.py，纯网不起服不占端口）**：形状钉=值 ADT（三字段+纯值面）/
+识别表三查/站点 == 两查/整路 map 逐位（同值/逐位/长度不齐/空输入）/错误代数封闭；
+RED 预期=模块缺位全红、改形处精准红（清单即需求文本）。
+
+---
+
 > 新册（2026-10-20，用户裁"新册"，册名 `replay/` 与 M1 包名对齐——转录前撞裁，可复议）：
 > M1 回放核（`src/symrepl/replay/`，ktest/branches/trace/driver 共 1007 行）的 cleanroom
 > 重写。性质=承重件（安全×程序分析交叠域核心因果链）。**零代码继承**：M1=规格源+行为

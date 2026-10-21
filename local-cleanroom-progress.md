@@ -30,6 +30,7 @@
 | continue | 横向与 E4 合流点：子进程事件泵（参考同构 reader 线程+owner 轮询，事件先发+dead 短路）+世代推进（决策 12 resume 失效）+exited/terminated 父面一变二（单源：child 只发执行面 exited）+_MAX_RESUMES 不随迁（偏离带因）；网炸端口面漏接单+terminated 双发（单源裁决）；守卫序勘误（相位先于世代解码，stale 触发随 setBreakpoints 迁移） | ✅ 2026-10-20（336b127）；probe_continue RED 6→12/12+八网回归全绿；DAP 生命周期首次全程可观测（launch→入口停→continue→exited+terminated） |
 | 横向 setBreakpoints | 第二次停相产出者：核表第 6 命令（params_fn 嵌套提取/非 dict 过滤+body verified 缺省）+backend 断点表全量替换（记册删旧/location 地址回解析 resolved+记册）+stop_reason_label 纯核推断（bp id 携 breakpoint_ids，count 0 越界防）+child 类型哨/键重包/Protocol 签名；守卫分布=类型域归 child、not_launched+空 path 留 backend；网炸**双键重包**（契约互斥表述，修=bare list+child 重包家法同构，与 scopes 砖忘重包成对）；RED 预测勘误 P7（单链直通 exit 先消费生命周期对，用户裁照单收） | ✅ 2026-10-20（6d5d1bb）；probe_breakpoints RED 10→17 查 ALL PASS+九网回归全绿；stale_reference 负路首次真实触发（世代票据消费侧闭环）+not_stopped/stale 两负路兑现 |
 | 引擎线 E1 ktest 解析重写 | 引擎线首件（新册 replay/，零代码继承首落地）：四答定稿（纯读/Expect 代数 KTest\|KtestBad 当值不抛/KtestBadReason 封闭三枚照 FrameBad 家法/新册）；值 ADT 字段同款 M1（v1→sym 0/0）；撞裁=私有 _Truncated fail-fast+parse 边界单点转值（逐点 None 检查漏检面大不取）；**语料册自检前置**（17 合成例+6 真件先对 M1 oracle 合预期，挡掉语料册两处 layout 错） | ✅ 2026-10-20（待提交笔）；probe_ktest RED 10→10/10 零网炸+纯网三件回归绿（server/ 零 diff，LLDB 六网无风险） |
+| 引擎线 E2 BranchSite 值代数与路径对比（纯件） | **取代裁决首落地（无 oracle——M1 代码不入境，E1 oracle 模式对本刀不适用）**，三轮撞裁定形：①x86 专用识别单表（aarch64/kind 权威路/parse_branch_target 全出局）②`+` 到达代数与混杂 step 两钉打回 ③**函数式定形**（用户三钉）：BranchSite 纯值无方法（代数住模块函数，"做不成代数该直说"）/== 自下而上（字段→`equal` 逐域合取无地址捷径→`match_path` map 高阶逐位）/实际执行只记录实际 list，对比独立代数；元素结果=Bool，长度不齐=PathBad(LENGTH_MISMATCH) 当值；可得性模型=target 侧三域全知、replay 侧 address/function 调用栈+mnemonic 反汇编（SBInstruction.GetMnemonic，E4 壳侧取） | ✅ 2026-10-21（待提交笔）；probe_branches RED 12→12/12（两轮打回新钉 RED 7/8 精准红）+纯网四件回归绿；网钉自愈一枚（hasattr 撞 tuple 继承面→__dict__+行为双钉）；网搬运进化=模块属性访问（小步部分绿可见）；壳侧预扫描/记录随 E4/branchTrace 接线 |
 
 ## 待办
 
@@ -39,9 +40,8 @@
 - [ ] 横向剩余 3 条（每条=完整循环）：next/stepIn/stepOut/pause（step 族同砖：S3 路由+step 事件）→ terminate → replay.branchTrace（引擎集大成，横向收尾；OQ-2 预告走 output 事件流非简单代理）
 - [ ] 收尾清单：stdio 模式、cli.py:151 接线改挂、pytest DAP 面 41 项改挂、ADR 注、原包 dap 四件退役、5c 真逻辑填实
 
-### 引擎线（每件配 oracle 对账网）
-- [ ] E2 BranchSite/预扫描语义+走向推断（纯件：合成 PC 序列网；语义源=branches.py+trace.py 纯面，代码不入境）
-- [ ] E4 会话编排续刀（continue 砖带事件泵+running 相位+事件流，setBreakpoints 砖带 reason 推断；余：(动作,事件)→SessionState 编洛建模收敛、branchTrace 的 trace_report 输出事件流）
+### 引擎线（对账网随件裁：E1 oracle 对账 / E2 起取代无 oracle）
+- [ ] E4 会话编排续刀（continue 砖带事件泵+running 相位+事件流，setBreakpoints 砖带 reason 推断；余：(动作,事件)→SessionState 编洛建模收敛、branchTrace 的 trace_report 输出事件流）——branchTrace 接线时消费 E2 代数（match_path/step/==）
 
 ## 挂账（未决小钉，撞结再裁）
 
