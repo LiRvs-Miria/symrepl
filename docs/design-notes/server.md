@@ -548,3 +548,71 @@ P4b；P4a 红因事件提前消费非生命周期伤），P1/P5 绿。
 
 **不变量**：记录点零处理（据实红线）；比对不入境（M4 工具）；无新命令；单源
 （child 事实/父面翻译）；未启用会话零增帧；E2 代数不接线（M4 消费）。
+
+## E4 编排代数化契约（2026-10-22，结构收敛刀：绿网上动结构；用户先验两钉+AI 攻击三枚+转录稿）
+
+**先验（用户两钉，2026-10-22）**：①执行面照协议面 v5 家法**代数化**——(动作，事件)→
+新状态的纯转移核、壳只执行动作、迁移不再散装；②加**纯核直测网**（直接发挥 FP
+白盒测试优势）。
+
+**AI 攻击记录（照单收，用户无异议）**：
+1. **双触发源**——协议面"事件不改协议状态"，执行面事件**就是**转移（STOPPED→
+   stopped、EXITED→dead）。核开两入口：命令转移（step/resolve）+事件转移（ingest）。
+2. **守卫矩阵实为两轴**——现状 threads 零相位守卫（process 在即可）、set_breakpoints
+   只查 process 在场、余者查相位（stack_trace∈{stopped,entry_stopped}、scopes/
+   variables∈{stopped}（OQ-2 分叉照旧冻结）、continue∈{stopped}、launch∈{entry}、
+   report_entry_stop∈{entry_stopped}）。表把矩阵收成数据，怪相从散装代码变可见表行；
+   **行为冻结，逐行照抄现状含错误码**。
+3. **唯一声明中的行为差：continue 失败臂世代推进时序**——现状推进+清账在
+   process.Continue() 之前（失败也推进，旧帧 id 变 stale 尽管同一次停）；代数化=
+   转移提交制，效果成功才提交，失败世代不进。用户照单收（2026-10-22）。
+
+**定形**：
+- **核**=`src/server/exec_algebra.py`（新册，后端无关——编排出端口契约定义；照
+  adapter.py 独立成册先例；lldb_backend 只剩壳）。`SessionState` 名已被事件词汇表
+  占用（KnownState|UnknownState），编演 ADT 铸名 **ExecPhase/ExecState**（撞随铸）。
+- **核状态**=ExecState{phase: ExecPhase（entry/entry_stopped/stopped/running/dead
+  五值 ADT，裸字符串退役），generation: int}。世代是守卫输入故入核；var_refs/
+  bp 表/轨迹节点/scope/sym_objects 是载荷数据，留壳私。
+- **核面**：`guard_exec(state, trigger) -> SessionError | None`（全矩阵，九触发器×
+  五相位）；`step_exec(state, trigger) -> ExecStep{state'=提案，effect，error}`
+  （三个转移命令：LAUNCH/CONTINUE/REPORT_ENTRY_STOP，守卫内嵌，error 行=提案原值）；
+  `resolve_exec(state, step, outcome) -> ExecState`（**提交制**：ExecOk→提案，ExecFail→
+  原值——行为差③由此结构兑现）；`ingest_exec(state, fact) -> ExecIngest{state',
+  emits}`（StopObserved(reason)→STOPPED+断点命中声明 CaptureNode、ExitObserved→
+  DEAD+EmitExit）；`poll_blocked(state) -> bool`（DEAD 短路=冻结真行为）。
+  效果词汇=ExecEffect（LAUNCH_INFERIOR/RESUME_INFERIOR/FINISH_CONFIG，铸名随撞随改）。
+- **壳**（Session 瘦身）：取数成 plain fact（classify_event/stop_reason_label 纯件
+  复用）→guard→效果→resolve 提交；世代差=壳清账信号（new.generation≠old→var_refs
+  clear）。wait_state（SB 阻塞 I/O）与 close（砖4 押后件）不入核。
+- **防御表行（端口不可达区域，用户批的类）**：threads/set_breakpoints×ENTRY→3012
+  （现状=裸崩区，家法裸崩=bug）；poll×ENTRY→短路（现状=潜藏崩溃区：launch 失败后
+  _backend 残留、poll 遇事件 classify 对 None 取 pid 即炸）。
+- **网策略**：新增 `probes/test_exec_core.py`（无端口无 LLDB，test_core 同款家法）
+  钉：矩阵逐行（九触发×五相位）+转移集+resolve 提交制语义+ingest 声明+铸名值与
+  旧字符串同形（壳迁移对账用）。15 网回归=行为冻结证据，零改动。
+- **小步序列（每步用户 review+网验证）**：①增核册（additive，树零动，RED 全红→
+  绿）②壳换守卫+命令转移（launch/report_entry_stop/continue 走核）③壳换事件
+  ingest+require_phase 退役+档案。
+- **撞到即裁清单（已铺不作废，随转录消费）**：ExecEffect 铸名终形；poll STOPPED 臂
+  取数先后结构（取数先于 ingest 声明）；_MAX_SITES 守阀落位（随 FINISH_CONFIG 效果
+  留壳）；进程在场谓词是否升核（现为表行近似）。
+
+**落地记录（2026-10-22 当日，E4 编排代数化关账）**：RED 25（模块缺位全红基线，
+probe_ktest 家法 MODULE_OK 门+清单即需求文本；首版矩阵查被缺位连坐吞 8 行，改
+字符串名惰性取枚举补全）→**步1 增核册** `exec_algebra.py`（additive 树零动；转录
+一次过 25/25 零网炸）→**步2 壳换守卫+命令转移**（`_exec: ExecState` 替换
+`_phase`/`_generation` 双散装；三转移命令 step→效果→resolve→`_commit`（世代差=
+壳清引用账本信号，清账随提交）；读守卫×5 换 guard_exec；threads/set_breakpoints
+防御行接装；**require_phase 退役**——契约写在步3，调用点全走核后成死码提前删，
+步3 只剩 ingest+档案）→**步3 壳换事件 ingest**（poll 两臂 StopObserved/ExitObserved
+落靶+CaptureNode/EmitExit 意图消费，穷尽 match assert_never；停相事件=转移直接
+产物现场组装，收场发帧=核声明意图壳执行）→档案。**LSP 实战**：步2 逮 `_generation`
+漏改四处（stack_trace 帧 id/scopes 两处/variables）——挂账「类型检查器」首次兑现。
+**转录自收两笔**：_GUARDS 首稿坏句法+把 SessionError 实例存表（改码存表、错误按
+相位现造）；assert_never 用而未导。**网况**：pytest 20/20+**16 网 rc=0 全绿**
+（新增 test_exec_core=纯核直测第 4 网；靶子易失重建按 conftest 配方、基线
+0/1/255 先钉后跑；flaky breakpoints 网本轮绿）。**行为冻结对账**：转移/守卫/
+错误码逐行照抄（含 OQ-2 分叉、dead 相位放行 set_breakpoints）；声明行为差一枚
+兑现（continue 失败臂世代不进=提交制结构红利）；防御行两枚生效（threads/
+set_breakpoints×ENTRY→3012、poll×ENTRY 短路——均端口不可达区，crash→干净错）。

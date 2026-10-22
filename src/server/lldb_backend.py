@@ -6,8 +6,8 @@ DebugBackend（session.py 内声明），本模块不 import 端口（零循环�
 
 纯/非纯劈分：判定全部下沉纯函数——plain 值进出、结果/错误当值返回（家法对齐
 FrameBad/BadChildMsg：不抛、不猜、不续）、错误码代数归 error.py 3xxx；
-SB 调用只住在 Session 壳里取数与动作——会话生命周期可按 (动作,事件)→状态
-严格建模（E4 编排接入口）。
+SB 调用只住在 Session 壳里取数与动作——会话编排放射归 exec_algebra 纯核
+（相位/守卫矩阵/转移提交制），本模块取数、执行效果、提交。
 
 坑清单即契约（phase1 蒸馏+本轮现形）：
 - 模块定位：plain import 失败走 `lldb -P`
@@ -29,6 +29,9 @@ from pathlib import Path
 from typing import NamedTuple, assert_never
 
 from error import SessionErrCode, SessionError
+from exec_algebra import (CaptureNode, EmitExit, ExecOk, ExecState, ExecTrigger,
+                          StopObserved, ExitObserved, guard_exec, ingest_exec,
+                          poll_blocked, resolve_exec, step_exec)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "replay"))
 from branches import is_conditional            # E2 识别代数（本砖首消费点）
@@ -165,17 +168,6 @@ def _physical(e: Exception, fallback: SessionErrCode) -> SessionErrCode:
 #end def
 
 
-def require_phase(phase: str, allowed: tuple[str, ...], action: str,
-                  code: SessionErrCode) -> SessionError | None:
-    """相位守卫判定（纯）：不当相位=SessionError 当值返回，调用方决定抛或译。"""
-    if phase not in allowed:
-        return SessionError(code, f"cannot {action} in phase {phase!r} "
-                                  f"(expected one of {allowed})")
-    #end if
-    return None
-#end def
-
-
 def load_lldb(lldb_dir: str):
     """定位 lldb python 绑定：plain import → `lldb_dir/lldb -P` 给路径再 import
     （不碰 PATH）。异常面=SessionError 一类；缺省码 NO_LLDB——一切定位失败都是
@@ -252,8 +244,7 @@ class Session:
             self.listener = self.lldb.SBListener("cleanroom-session")
             self.process = None
             self.target_path = target
-            self._phase = "entry"               # entry → entry_stopped → stopped（running/dead 随 continue 砖）
-            self._generation = 0                # 世代票据（decision 12）：frame id=generation*1000+index
+            self._exec = ExecState()            # 编排态（相位+世代票据）：核所有，壳只提交
             self._var_refs = {}                 # 变量引用账本（适配器私有）：ref→(generation, frame_index)
             self._ref_counter = 0               # 引用计数器：ref=generation*100000+counter（第二 id 空间）
             self._own_breakpoint_ids: list[int] = []   # 自有断点 id 表（全量替换凭册删旧）
@@ -266,6 +257,16 @@ class Session:
         #end try
         _created = True
     #end def
+
+    def _commit(self, state: ExecState) -> None:
+        """提交编排态（核 resolve 落靶后的唯一写点）：世代有进=壳清引用账本
+        （决策 12：resume 使旧引用失效——清账随提交，效果败不进世代）。"""
+        if state.generation != self._exec.generation:
+            self._var_refs.clear()
+        #end if
+        self._exec = state
+    #end def
+
     def launch(self, ktest: str, *, scope: str | None = None,
                sym_objects: list[dict] | None = None,
                stdout_path: str | None = None,
@@ -278,10 +279,10 @@ class Session:
         本模块零 ktest 文件 I/O，对账字节以父面校验过的那份为准）。
         回 inferior pid（端口面 process 事件的 systemProcessId 源）。"""
         try:
-            guard = require_phase(self._phase, ("entry",), "launch",
-                                  SessionErrCode.ALREADY_LAUNCHED)
-            if guard is not None:
-                raise guard
+            old = self._exec
+            step = step_exec(old, ExecTrigger.LAUNCH)
+            if step.error is not None:
+                raise step.error
             #end if
             if not ktest:
                 raise SessionError(SessionErrCode.BAD_ARGS, "ktest path required")
@@ -324,7 +325,7 @@ class Session:
                 raise SessionError(SessionErrCode.ENTRY_NOT_STOPPED,
                                    f"entry wait landed in {state!r}")
             #end if
-            self._phase = "entry_stopped"       # 入口停已到手（静默：上报归 config_done）
+            self._commit(resolve_exec(old, step, ExecOk()))   # 入口停已到手（静默：上报归 config_done）
             return int(self.process.GetProcessID())
         except Exception as e:
             raise SessionError(_physical(e, SessionErrCode.LAUNCH_FAILED), repr(e)) from e
@@ -335,30 +336,28 @@ class Session:
         """放行 inferior（异步：返回即已续跑，完成以事件到达，response 不等它）。
         spike 规则：非阻塞排空队列残事件再续（历史不当新闻）；决策 12：resume
         使旧引用失效——世代推进+账本清空。"""
-        guard = require_phase(self._phase, ("stopped",),
-                              "continue", SessionErrCode.NOT_STOPPED)
-        if guard is not None:
-            raise guard
+        old = self._exec
+        step = step_exec(old, ExecTrigger.CONTINUE)
+        if step.error is not None:
+            raise step.error
         #end if
         ev = self.lldb.SBEvent()
         while self.listener.GetNextEvent(ev):
             pass                                # spike 规则：残事件排空
         #end while
-        self._generation += 1                   # 决策 12：resume 推进世代
-        self._var_refs.clear()
         try:
             self.process.Continue()
         except Exception as e:
             raise SessionError(_physical(e, SessionErrCode.RESUME_FAILED), repr(e)) from e
         #end try
-        self._phase = "running"
+        self._commit(resolve_exec(old, step, ExecOk()))   # 世代有进=清账随提交（效果败不进世代）
         return {"all_threads_continued": True}
     #end def
 
     def poll_events(self) -> list[dict]:
         """非阻塞事件泵（owner 轮询用）：GetNextEvent 不等，判定在 classify_event。
         dead 短路：终态后不再产事件（防忙烧）。"""
-        if self._phase == "dead":
+        if poll_blocked(self._exec):
             return []
         #end if
         events: list[dict] = []
@@ -370,26 +369,33 @@ class Session:
                 case Drop():
                     continue                    # 排空（判定在纯核）
                 case Accept(state=KnownState.STOPPED):
-                    self._phase = "stopped"
                     thread = self.process.GetThreadAtIndex(0)
                     count = int(thread.GetStopReasonDataCount())
                     reason, bp_ids = stop_reason_label(
                         int(thread.GetStopReason()), count,
                         int(thread.GetStopReasonDataAtIndex(0)) if count else 0)
+                    ingest = ingest_exec(self._exec, StopObserved(reason=reason))
+                    self._exec = ingest.state
                     params = {"reason": reason,
                               "thread_id": int(thread.GetThreadID()),
                               "all_threads_stopped": True}
                     if bp_ids:
                         params["breakpoint_ids"] = bp_ids
                     #end if
-                    if reason == "breakpoint":   # 记录点=断点命中（actual 定义；入口停非命中不记）
-                        self._trace_nodes.append(
-                            self._capture_node(thread, len(self._trace_nodes) + 1))
-                    #end if
+                    for emit in ingest.emits:    # 取数意图核声明，壳执行（记录点=断点命中）
+                        match emit:
+                            case CaptureNode():
+                                self._trace_nodes.append(
+                                    self._capture_node(thread, len(self._trace_nodes) + 1))
+                            case _:
+                                assert_never(emit)
+                        #end match
+                    #end for
                     events.append({"event": "stopped", "params": params})
                 case Accept(state=KnownState.EXITED) | Accept(state=KnownState.CRASHED):
                     code = int(self.process.GetExitStatus())
-                    self._phase = "dead"
+                    ingest = ingest_exec(self._exec, ExitObserved(exit_code=code))
+                    self._exec = ingest.state
                     # 只发执行面事实 exited；terminated 的 DAP 惯例展开归父面翻译（单源）。
                     # branch tracing 启用（scope 在册）才附报告——未启用会话零增帧。
                     params: dict = {"exit_code": code}
@@ -397,7 +403,14 @@ class Session:
                         params["trace_report"] = {"text": self._render_trace(),
                                                   "nodes": self._trace_nodes}
                     #end if
-                    events.append({"event": "exited", "params": params})
+                    for emit in ingest.emits:    # 发帧意图核声明，壳执行
+                        match emit:
+                            case EmitExit():
+                                events.append({"event": "exited", "params": params})
+                            case _:
+                                assert_never(emit)
+                        #end match
+                    #end for
                     break                       # 终态：不再产事件
                 case _:
                     pass                        # DETACHED/Unknown：留痕丢弃
@@ -460,10 +473,9 @@ class Session:
     def stack_trace(self, thread_id: int, levels: int) -> dict:
         """栈帧（世代票据：id=generation*1000+index）。守卫与线程存在性在此判定，
         帧取数不包（家法同上）。"""
-        guard = require_phase(self._phase, ("stopped", "entry_stopped"),
-                              "read the stack", SessionErrCode.NOT_STOPPED)
-        if guard is not None:
-            raise guard
+        err = guard_exec(self._exec, ExecTrigger.STACK_TRACE)
+        if err is not None:
+            raise err
         #end if
         thread = self.process.GetThreadByID(int(thread_id))
         if not thread.IsValid():
@@ -486,7 +498,7 @@ class Session:
                     path = filespec.fullpath or filespec.GetFilename() or ""
                 #end if
             #end if
-            frames.append({"id": self._generation * 1000 + index, "name": name,
+            frames.append({"id": self._exec.generation * 1000 + index, "name": name,
                            "line": line, "column": column, "path": path})
         #end for
         return {"stack_frames": frames, "total_frames": total}
@@ -495,16 +507,15 @@ class Session:
     def scopes(self, frame_id: int) -> list[dict]:
         """帧的作用域引用（守卫单集 stopped，照参考；OQ-2 分集合首分叉）。
         解码世代→验帧→发引用并登记账本；SB 取数不包（家法）。"""
-        guard = require_phase(self._phase, ("stopped",),
-                              "read scopes", SessionErrCode.NOT_STOPPED)
-        if guard is not None:
-            raise guard
+        err = guard_exec(self._exec, ExecTrigger.SCOPES)
+        if err is not None:
+            raise err
         #end if
         generation, frame_index = divmod(int(frame_id), 1000)
-        if generation != self._generation:
+        if generation != self._exec.generation:
             raise SessionError(SessionErrCode.STALE_REFERENCE,
                                f"frame id from generation {generation}, "
-                               f"current generation is {self._generation}")
+                               f"current generation is {self._exec.generation}")
         #end if
         thread = self.process.GetThreadAtIndex(0)
         if frame_index >= thread.GetNumFrames():
@@ -518,13 +529,12 @@ class Session:
 
     def variables(self, ref: int) -> list[dict]:
         """引用背后的变量（平铺无子）。解引用验世代；SB 取数不包（家法）。"""
-        guard = require_phase(self._phase, ("stopped",),
-                              "read variables", SessionErrCode.NOT_STOPPED)
-        if guard is not None:
-            raise guard
+        err = guard_exec(self._exec, ExecTrigger.VARIABLES)
+        if err is not None:
+            raise err
         #end if
         entry = self._var_refs.get(int(ref))
-        if entry is None or entry[0] != self._generation:
+        if entry is None or entry[0] != self._exec.generation:
             raise SessionError(SessionErrCode.STALE_REFERENCE,
                                f"variables reference {ref} is not from the current stop")
         #end if
@@ -551,9 +561,9 @@ class Session:
         删旧凭册→逐行 BreakpointCreateByLocation；invalid→verified False；
         valid→location address 的 line entry 解析 resolved+记册。
         回断点行裸清单（{"breakpoints": …} 键重包归 child，家法同构）。"""
-        if self.process is None:
-            raise SessionError(SessionErrCode.NOT_LAUNCHED,
-                               "no session to place breakpoints in")
+        err = guard_exec(self._exec, ExecTrigger.SET_BREAKPOINTS)
+        if err is not None:
+            raise err
         #end if
         if not path:
             raise SessionError(SessionErrCode.BAD_ARGS,
@@ -590,15 +600,15 @@ class Session:
         """config_done 原语：入口停上报（entry_stopped→stopped），回 stopped 事件 params。
         thread_id=thread 0 的真 SB id（单线程契约；stopped 线程选取随 continue 砖细化）。
         scope 在册=先自动插桩（入口停内做——PIE 载入地址此时才解析），插桩失败=大声炸。"""
-        guard = require_phase(self._phase, ("entry_stopped",),
-                              "finish configuration", SessionErrCode.NOT_LAUNCHED)
-        if guard is not None:
-            raise guard
+        old = self._exec
+        step = step_exec(old, ExecTrigger.REPORT_ENTRY_STOP)
+        if step.error is not None:
+            raise step.error
         #end if
         if self._scope:
             self._instrument_scope()
         #end if
-        self._phase = "stopped"
+        self._commit(resolve_exec(old, step, ExecOk()))
         thread = self.process.GetThreadAtIndex(0)
         return {"reason": "entry", "thread_id": int(thread.GetThreadID()),
                 "all_threads_stopped": True}
