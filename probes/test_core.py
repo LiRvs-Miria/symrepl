@@ -7,8 +7,9 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src" / "server"))
-from adapter import (Command, Done, ForwardRequest, ParsedRequest, ProtoState,
-                     Rejected, StateEnum, StepResult, build_replies, resolve, step)
+from adapter import (Command, Crashed, Done, Event, ForwardRequest, OkReply,
+                     ParsedRequest, ProtoState, Rejected, StateEnum, StepResult,
+                     TearDownChild, build_replies, resolve, step)
 from error import InternalErrCode
 
 fails = []
@@ -139,6 +140,47 @@ ok = (len(frames) == 1 and frames[0]["success"] is True
       and frames[0]["body"] == {"breakpoints": [{"verified": True, "line": 20},
                                                 {"verified": False, "line": 21}]})
 check("resolve: setBreakpoints 成臂（键映射+verified 缺省 False，杂键滤除）", ok)
+
+
+# ---------- 砖4 收场：disconnect 带 TearDownChild（拆除后发，双帧归 resolve） ----------
+
+def td_of(req):
+    """TearDownChild 构造（req 位随落位定形）：占位裸员时代 TypeError→None=RED 不炸网。"""
+    try:
+        return TearDownChild(req=req)
+    except TypeError:
+        return None
+#end def
+
+# step：(S3, disconnect) 自回环携 TearDownChild（有肉身，拆除先行）
+r = req_of("disconnect")
+res = step(ProtoState(phase=StateEnum.S3), r)
+ok = (res.state.phase == StateEnum.S3 and res.frames == ()
+      and isinstance(res.action, TearDownChild)
+      and getattr(res.action, "req", None) is r)
+check("step: (S3, disconnect) 自回环携 TearDownChild（拆除后发，双帧归 resolve）", ok)
+
+# step：(S1, disconnect) 纯转移现状冻结（S0/S1 无肉身，无可拆）
+res = step(ProtoState(phase=StateEnum.S1), req_of("disconnect"))
+ok = (res.state.phase == StateEnum.DEAD and res.action is None
+      and len(res.frames) == 2)
+check("step: (S1, disconnect) 纯转移 DEAD+双帧（S0/S1 无肉身不拆，形状冻结）", ok)
+
+# resolve：(TearDownChild, Done) → DEAD+slot 清+双帧（OkReply+terminated）
+td = td_of(req_of("disconnect"))
+res = resolve(ProtoState(phase=StateEnum.S3), td, Done({})) if td is not None else None
+ok = (res is not None and res.state.phase == StateEnum.DEAD
+      and res.state.slot is None and len(res.frames) == 2
+      and isinstance(res.frames[0], OkReply)
+      and isinstance(res.frames[1], Event) and res.frames[1].event == "terminated")
+check("resolve: (TearDownChild, Done) → DEAD+slot 清+双帧（OkReply+terminated）", ok)
+
+# resolve：(TearDownChild, Crashed) 同落靶（拆除尽力而为，会话照终=立场乙收场）
+res = (resolve(ProtoState(phase=StateEnum.S3), td, Crashed("teardown blew"))
+       if td is not None else None)
+ok = (res is not None and res.state.phase == StateEnum.DEAD
+      and res.state.slot is None and len(res.frames) == 2)
+check("resolve: (TearDownChild, Crashed) 同落靶（尽力而为，会话照终）", ok)
 
 
 if __name__ == "__main__":

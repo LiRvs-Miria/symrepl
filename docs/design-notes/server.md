@@ -616,3 +616,51 @@ probe_ktest 家法 MODULE_OK 门+清单即需求文本；首版矩阵查被缺�
 错误码逐行照抄（含 OQ-2 分叉、dead 相位放行 set_breakpoints）；声明行为差一枚
 兑现（continue 失败臂世代不进=提交制结构红利）；防御行两枚生效（threads/
 set_breakpoints×ENTRY→3012、poll×ENTRY 短路——均端口不可达区，crash→干净错）。
+
+## 砖4+砖5 收场契约（2026-10-22，协议线收场；用户三钉：带 TearDownChild·拆除后发／退出码归类=日志+落靶 detail／混沌三路起步）
+
+**先验（用户三钉，2026-10-22）**：①disconnect 带 **TearDownChild** 动作，**拆除后发**
+（双帧随 resolve 落靶，对齐参考"terminated 是拆除副产品"帧序）②退出码归类：
+child 拆除结局（干净自杀 vs 强杀）归父侧日志+落靶 detail，父退出码维持传输层
+FIN/ABRUPT 不动 ③砖5 混沌三路（SIGKILL 在途/child 自毙 fatal/挂起超时），不够再扩。
+
+**AI 攻击记录（四枚，照单收）**：
+1. **S0/S1 无肉身，断路器分两行**——不变量：S2/S3 ⇒ 肉身在册（FulfillLaunch Done
+   才落 S2/S3）；S0/S1 disconnect 维持纯转移（现状形状，无可拆）。
+2. **自毙 ≡ SIGKILL（父侧不可分辨）**——reader EOF 报丧+decision 8 使两死法在
+   父侧同为 Gone；DAP 级一章死亡网覆盖两死法（自毙机制级 childseam T 系已钉），
+   注入器用 SIGKILL。
+3. **SIGKILL 的孤儿是场景定义**——杀会话员则 inferior/lldb-server 必成孤
+   （backend.close 永不运行）：混沌网探针自清孤儿，孤儿断言只在拆除章持有。
+4. **行为兼容钉**——拆除后发对客户端帧形状零差（隐式链在已测路径孤儿干净）；
+   砖4 RED 落核级（test_core 新查），C1/C2/C3 为收编钉，RED 预期诚实标注部分
+   首跑即绿。FIN/RST/坏帧路维持隐式链（对齐参考的 FIN 同为进程退→子 EOF），
+   显式化不外溢到客户端告别路。
+
+**定形**：
+- **核（adapter.py）**：`TearDownChild` 增 `req: ParsedRequest`（占位员落位定形）；
+  step 分行：`(S2|S3, DISCONNECT)`→`StepResult(state=pstate, action=TearDownChild(req))`
+  （frames=() 静默，双帧归 resolve）；`(S0|S1, DISCONNECT)`→现状纯转移；
+  resolve 增 `(TearDownChild(req), _)` 行——**任何 outcome 同落靶**：DEAD+slot=None
+  +双帧（OkReply payload={}+terminated{}；拆除尽力而为、会话照终=立场乙收场，
+  码/话术不因拆除结局变）。
+- **壳（schedule.py）**：`child_close` 返回归类 **"graceful"**（wait 破 2s 优雅窗）/
+  **"killed"**（kill 发射）——退出码归类落点；run_effect 增 TearDownChild 臂：
+  child=None=不变量洞大声失败（同 ForwardRequest 家法）、child_close 归类+returncode
+  入日志（`child_teardown how=... rc=...`）、回 Done（how 当值）；handle 零改动
+  （断路器形状红利：action 路 run_effect→resolve 既有）；stdio 路同 handle 天然覆盖。
+- **核级网（test_core 增查，RED 落点）**：step (S3,disconnect)→action TearDownChild
+  携 req、frames 空；step (S1,disconnect)→纯转移形状冻结（RED 期即绿）；resolve
+  (TearDownChild, Done/Crashed) 同落靶（尽力而为语义钉）。
+- **混沌网（probes/probe_chaos.py，端口 5697，真饵）**：
+  C1 死亡在途：全链→SIGKILL child→stackTrace→2002 携 upstream_refused（快败不烧
+  timeout）→threads→2002（父活陪到底）→disconnect→resp+terminated+FIN rc=0
+  （对尸 child 拆除幂等）；孤儿=探针自清（chaos 定义）。
+  C2 挂起：全链→SIGSTOP child→threads→2002 携 upstream_timeout（烧 timeout=10s，
+  网预算注明）→SIGKILL 收场→disconnect 链同 C1。
+  C3 拆除判别（砖4）：全链+setBreakpoints→continue→bp 停（inferior 活着）→
+  disconnect→resp+terminated→**孤儿断言持有**（get_sign/lldb-server 零残留=显式
+  拆除确定性兑现）+FIN rc=0。
+- **小步序列**：①核+壳（test_core RED→绿+全网回归=收场链行为兼容证据）
+  ②probe_chaos C1/C2/C3 ③档案（design-notes/进度档协议线收口/ledger）+终版
+  sweep+待提交。

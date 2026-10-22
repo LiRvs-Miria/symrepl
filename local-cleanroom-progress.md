@@ -42,8 +42,8 @@
 ## 待办
 
 ### 协议线
-- [ ] 砖4 收场路（**押后中**）：disconnect 带 child 拆除（`TearDownChild` 占位员落位）、退出码归类
-- [ ] 砖5 child 死路混沌探针（立场乙：父活快败陪到底）
+- [ ] 砖4 收场路（**进行中 2026-10-22 冻结点**：契约已批落纸 design-notes「砖4+砖5 收场契约」——用户三钉（带 TearDownChild·拆除后发／退出码归类 graceful|killed 归日志+落靶 detail／混沌三路起步）+AI 攻击四枚照单收（S0/S1 无肉身分行／自毙≡SIGKILL 一章两死法／SIGKILL 孤儿=场景定义探针自清／行为兼容钉 RED 落核级）；**核级 RED 已铺** test_core 3 FAIL/1 PASS（S1 形状冻结查按契约 RED 期即绿）；**下一步=步1 核+壳转录**：adapter.py（TearDownChild 带 req/(S2|S3)disconnect 携动作/(S0|S1) 纯转移冻结/resolve 任何 outcome 同落靶 DEAD+双帧）+schedule.py（child_close 归类返回 graceful|killed+run_effect 拆除臂，handle 零改动）→test_core 转绿+16 网回归（收场链行为兼容）→步2 probe_chaos（5697：C1 死亡在途 SIGKILL/C2 挂起 SIGSTOP 烧 10s timeout/C3 拆除判别 bp 停相 disconnect 孤儿持有）→步3 档案收口+待提交）
+- [ ] 砖5 child 死路混沌探针（立场乙：父活快败陪到底；**与砖4 合并推进**——chaos 网 C1/C2 即砖5，范围三路起步不够再扩，见 design-notes 收场契约）
 - [x] stdio 模式（✅ 2026-10-21：schedule `--stdio` flag+`amain_stdio`——handle 传输无关直接接管 stdin/stdout，单"连接"=进程即会话，信号=读侧 feed_eof；probe_stdio 6/6 绿（握手/状态门/真链/收场/stdin-EOF/卫生）+四网回归绿）
 - [x] roadmap en/zh 编辑性修订（✅ 2026-10-21 已随 7ba89f2：branchTrace 重定形/stepping 押后非砍死/一致性校验归 M4）
 - [x] ~~归一一步到位（原 A 案：五件包化/replay-algebra 子包/13 网搬家/pytest 41 项重切）~~（✅ 2026-10-22 以 **B 案**关账：cleanroom 原地转正+src dap 退役+framing 20 项补位+cli 子进程派发——见已关账表；A 案细则整体作废）
