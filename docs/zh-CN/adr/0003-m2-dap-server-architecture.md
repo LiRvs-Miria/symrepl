@@ -152,3 +152,13 @@ M2 的目标（见 roadmap）：回放会话可被 VS Code 与任何 DAP 客户�
   M2-b1（DAP 生命周期 + threads/stackTrace/continue + 测试客户端）、
   M2-b2（scopes/variables + 源码断点）、M2-c（分支追踪上 DAP）、
   M2-d（stepping）、M2-e（扩展、文档、验收场景、混沌测试）。
+
+## 修订（2026-10-22）：cleanroom 实现转正
+
+原 M2-a 实现（`symrepl.dap.server`/`service`/`session`/`framing`）由
+cleanroom 重写整体替代，按归一 B 案**原地转正**于 `local-cleanroom/server/`：
+DAP 面以 checkout 内脚本形态存在，不是安装包。上文的裁决（拓扑、内部协议、
+传输、DAP 子集）原样延续；文中模块路径指原始实现。现接线：`symrepl dap`
+以子进程方式派发 `local-cleanroom/server/schedule.py`（退出码透传）；
+父进程=`schedule.py`，每会话子进程=`session.py`。DAP 面的包化押后，
+待真实消费方（如 ptrfuzz）需要 import 时再做。

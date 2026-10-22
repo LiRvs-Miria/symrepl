@@ -133,7 +133,7 @@ Known risks (planning pass 2026-10-05):
 > Since 2026-10-16 the cleanroom rebuild re-implements the M2 service
 > surface; the rebuild made the following substantive rulings on the
 > original M2 slices (rationale in
-> `local-cleanroom/server/design-notes.md`):
+> `docs/design-notes/server.md`):
 
 - **stepping deferred** (the original M2-d keeps its slot, to be
   implemented after the M2 wrap-up): the replay core = pre-scan
@@ -163,6 +163,18 @@ Known risks (planning pass 2026-10-05):
   path consistency verification (modeling/solving) is part of M4
   trace analysis — an independent analysis layer consuming the report
   (see M4).
+
+## Cleanroom promotion completed (2026-10-22)
+
+The cleanroom rewrite is the product tree, promoted in place: `src/`
+now holds the DAP face (`server/`, run as checkout scripts), the replay
+algebras (`replay/`), the nets (`probes/`) and the manual client
+(`client/`).  With the replacement ruling taken to its conclusion, the
+original M1 CLI replay path (`symrepl <ktest>`, `cli.py`, the M1
+modules and their tests) was retired the same day — replay capability
+is delivered over DAP (see `docs/en/dap.md`; git history archives M1).
+The `symrepl` console command is gone; packaging returns when a real
+consumer needs to import the tree.
 
 ## M3 — LLVM IR / DWARF mapping
 

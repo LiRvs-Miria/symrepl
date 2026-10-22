@@ -54,7 +54,8 @@ ptrfuzz 之于 symrepl，如同 Clang 之于 LLVM：从 ptrfuzz M2 起，symrepl
 
 ## 状态
 
-M1（在 LLDB 下回放 ktest）与 M2（DAP server 模式）已完成——路线图见
+M2（DAP server 模式）是产品面，M1 的回放能力经它交付（原 M1 CLI 已于
+2026-10-22 退役——见 roadmap 的 cleanroom 转正注记）。路线图见
 [docs/roadmap.md](docs/zh-CN/roadmap.md)，M2 架构契约见
 [ADR-0003](docs/zh-CN/adr/0003-m2-dap-server-architecture.md)。下一步是
 M3（LLVM IR / DWARF 映射）。DAP 用法：

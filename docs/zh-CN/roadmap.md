@@ -111,7 +111,7 @@ mock-debug 的 DAP 子集；分支追踪经 `stopOnBranch` 与自定义请求
 ## branchTrace 重定形与砍裁/押后（2026-10-21，cleanroom 转正期裁决）
 
 > 2026-10-16 起 cleanroom 转正工程整体重写 M2 服务面；重建期对原 M2 切片
-> 做出如下实质裁决（rationale 见 `local-cleanroom/server/design-notes.md`）：
+> 做出如下实质裁决（rationale 见 `docs/design-notes/server.md`）：
 
 - **stepping 押后**（原 M2-d 保留地位，M2 收尾后实现）：回放核=预扫描插桩+
   bp+continue 推进+报告产出，交互步进是断点停下后的**用户调试策略**，不承重
@@ -127,6 +127,15 @@ mock-debug 的 DAP 子集；分支追踪经 `stopOnBranch` 与自定义请求
 - **值/路径两层校验劈分**：值一致性（符号值 vs ktest 解）随回放报告产出；
   路径一致性校验（建模/求解）=M4 轨迹分析的一部分，消费报告的独立分析层
   （见 M4）。
+
+## Cleanroom 转正完成（2026-10-22）
+
+cleanroom 重写即产品树，原地转正：`src/` 现在承载 DAP 面（`server/`，
+按 checkout 脚本运行）、回放代数（`replay/`）、15 网（`probes/`）与
+手动客户端（`client/`）。取代裁决走到底：原 M1 CLI 回放路径
+（`symrepl <ktest>`、`cli.py`、M1 模块及其测试）同日退役——回放能力
+经 DAP 交付（见 `docs/zh-CN/dap.md`；M1 存档于 git 历史）。`symrepl`
+命令随之消失；待真实消费方需要 import 时再做包化。
 
 ## M3 — LLVM IR / DWARF 映射
 

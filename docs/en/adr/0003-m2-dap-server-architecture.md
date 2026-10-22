@@ -194,3 +194,17 @@ client. Research against the DAP specification, `lldb-dap`,
   continue + test client), M2-b2 (scopes/variables + source
   breakpoints), M2-c (branch tracing over DAP), M2-d (stepping),
   M2-e (extension, docs, acceptance scenario, chaos tests).
+
+## Amendment (2026-10-22): cleanroom implementation promoted
+
+The original M2-a implementation (`symrepl.dap.server`/`service`/`session`/
+`framing`) was replaced wholesale by the cleanroom rewrite, promoted **in
+place** under `local-cleanroom/server/` (decision B of the unification):
+the DAP face lives as checkout-tree scripts, not an installed package.
+The decisions above (topology, internal protocol, transport, DAP subset)
+carry over unchanged; module paths in this document refer to the original
+implementation. Current wiring: `symrepl dap` dispatches to
+`local-cleanroom/server/schedule.py` as a subprocess (exit codes pass
+through); the parent process is `schedule.py`, the per-session child is
+`session.py`. Packaging of the DAP face is deferred until a real consumer
+(e.g. ptrfuzz) needs to import it.

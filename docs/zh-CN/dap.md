@@ -6,8 +6,9 @@ stdio 或单条 TCP 连接。
 
 ## 运行
 
-    symrepl dap                # stdio —— 单客户端、单会话
-    symrepl dap --port 47113   # 127.0.0.1:47113 上的单客户端
+    python3 src/server/schedule.py --stdio            # stdio —— 单客户端、单会话
+    python3 src/server/schedule.py --port 47113 --lldb-dir /usr/lib/llvm-22/bin
+    # （见 `python3 src/server/schedule.py --help`；--lldb-dir = 工具链目录）
 
 生命周期：`initialize` → `launch`（响应扣留）→ `initialized` 事件 →
 `setBreakpoints`/… → `configurationDone` → launch 响应 →

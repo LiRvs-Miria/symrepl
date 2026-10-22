@@ -29,11 +29,9 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8", "hypothesis>=6"]
 
-[project.scripts]
-symrepl = "symrepl.cli:main"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/symrepl"]
+# No installable package: the DAP face runs as checkout-tree scripts
+# (src/server) and the tool is driven in place (probes, tests, client).
+# Packaging returns when a real consumer needs to import it.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
