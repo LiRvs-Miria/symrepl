@@ -568,7 +568,7 @@ P4b；P4a 红因事件提前消费非生命周期伤），P1/P5 绿。
    转移提交制，效果成功才提交，失败世代不进。用户照单收（2026-10-22）。
 
 **定形**：
-- **核**=`src/server/exec_algebra.py`（新册，后端无关——编排出端口契约定义；照
+- **核**=`src/server/session_lifecycle.py`（新册，后端无关——编排出端口契约定义；照
   adapter.py 独立成册先例；lldb_backend 只剩壳）。`SessionState` 名已被事件词汇表
   占用（KnownState|UnknownState），编演 ADT 铸名 **ExecPhase/ExecState**（撞随铸）。
 - **核状态**=ExecState{phase: ExecPhase（entry/entry_stopped/stopped/running/dead
@@ -588,7 +588,7 @@ P4b；P4a 红因事件提前消费非生命周期伤），P1/P5 绿。
 - **防御表行（端口不可达区域，用户批的类）**：threads/set_breakpoints×ENTRY→3012
   （现状=裸崩区，家法裸崩=bug）；poll×ENTRY→短路（现状=潜藏崩溃区：launch 失败后
   _backend 残留、poll 遇事件 classify 对 None 取 pid 即炸）。
-- **网策略**：新增 `probes/test_exec_core.py`（无端口无 LLDB，test_core 同款家法）
+- **网策略**：新增 `probes/test_session_lifecycle.py`（无端口无 LLDB，test_core 同款家法）
   钉：矩阵逐行（九触发×五相位）+转移集+resolve 提交制语义+ingest 声明+铸名值与
   旧字符串同形（壳迁移对账用）。15 网回归=行为冻结证据，零改动。
 - **小步序列（每步用户 review+网验证）**：①增核册（additive，树零动，RED 全红→
@@ -600,7 +600,7 @@ P4b；P4a 红因事件提前消费非生命周期伤），P1/P5 绿。
 
 **落地记录（2026-10-22 当日，E4 编排代数化关账）**：RED 25（模块缺位全红基线，
 probe_ktest 家法 MODULE_OK 门+清单即需求文本；首版矩阵查被缺位连坐吞 8 行，改
-字符串名惰性取枚举补全）→**步1 增核册** `exec_algebra.py`（additive 树零动；转录
+字符串名惰性取枚举补全）→**步1 增核册** `session_lifecycle.py`（additive 树零动；转录
 一次过 25/25 零网炸）→**步2 壳换守卫+命令转移**（`_exec: ExecState` 替换
 `_phase`/`_generation` 双散装；三转移命令 step→效果→resolve→`_commit`（世代差=
 壳清引用账本信号，清账随提交）；读守卫×5 换 guard_exec；threads/set_breakpoints
@@ -611,7 +611,7 @@ probe_ktest 家法 MODULE_OK 门+清单即需求文本；首版矩阵查被缺�
 漏改四处（stack_trace 帧 id/scopes 两处/variables）——挂账「类型检查器」首次兑现。
 **转录自收两笔**：_GUARDS 首稿坏句法+把 SessionError 实例存表（改码存表、错误按
 相位现造）；assert_never 用而未导。**网况**：pytest 20/20+**16 网 rc=0 全绿**
-（新增 test_exec_core=纯核直测第 4 网；靶子易失重建按 conftest 配方、基线
+（新增 test_session_lifecycle=纯核直测第 4 网；靶子易失重建按 conftest 配方、基线
 0/1/255 先钉后跑；flaky breakpoints 网本轮绿）。**行为冻结对账**：转移/守卫/
 错误码逐行照抄（含 OQ-2 分叉、dead 相位放行 set_breakpoints）；声明行为差一枚
 兑现（continue 失败臂世代不进=提交制结构红利）；防御行两枚生效（threads/

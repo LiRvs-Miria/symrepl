@@ -6,7 +6,7 @@ DebugBackend（session.py 内声明），本模块不 import 端口（零循环�
 
 纯/非纯劈分：判定全部下沉纯函数——plain 值进出、结果/错误当值返回（家法对齐
 FrameBad/BadChildMsg：不抛、不猜、不续）、错误码代数归 error.py 3xxx；
-SB 调用只住在 Session 壳里取数与动作——会话编排放射归 exec_algebra 纯核
+SB 调用只住在 Session 壳里取数与动作——会话生命周期归 session_lifecycle 纯核
 （相位/守卫矩阵/转移提交制），本模块取数、执行效果、提交。
 
 坑清单即契约（phase1 蒸馏+本轮现形）：
@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import NamedTuple, assert_never
 
 from error import SessionErrCode, SessionError
-from exec_algebra import (CaptureNode, EmitExit, ExecOk, ExecState, ExecTrigger,
+from session_lifecycle import (CaptureNode, EmitExit, ExecOk, ExecState, ExecTrigger,
                           StopObserved, ExitObserved, guard_exec, ingest_exec,
                           poll_blocked, resolve_exec, step_exec)
 

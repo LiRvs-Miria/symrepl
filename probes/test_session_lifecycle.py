@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""test_exec_core — 执行面编排放射纯核直测（不起服务、不起 LLDB，喂 ADT）。
+"""test_session_lifecycle — 执行面会话生命周期核直测（不起服务、不起 LLDB，喂 ADT）。
 
-盖 exec_algebra 核的可纯测行为：守卫矩阵逐行（触发×五相位，冻结现状含
+盖 session_lifecycle 核的可纯测行为：守卫矩阵逐行（触发×五相位，冻结现状含
 错误码与两轴怪相）、命令转移 step/resolve（提交制：效果成功才提交——
 continue 失败臂世代不进=本刀唯一声明行为差）、事件 ingest（StopObserved/
 ExitObserved→状态+声明）、poll 短路谓词、铸名值与旧字符串同形（壳迁移对账）。
@@ -18,7 +18,7 @@ from error import SessionErrCode, SessionError
 
 MODULE_OK = True
 try:
-    from exec_algebra import (CaptureNode, EmitExit, ExecEffect, ExecFail, ExecOk,
+    from session_lifecycle import (CaptureNode, EmitExit, ExecEffect, ExecFail, ExecOk,
                               ExecPhase, ExecState, ExecTrigger, StopObserved,
                               ExitObserved, guard_exec, ingest_exec, poll_blocked,
                               resolve_exec, step_exec)
@@ -230,7 +230,7 @@ if __name__ == "__main__":
             #end try
         #end for
     else:
-        print(f"exec_algebra 模块缺位（RED 全红基线）：{_IMPORT_DETAIL}")
+        print(f"session_lifecycle 模块缺位（RED 全红基线）：{_IMPORT_DETAIL}")
         for name, _ in CHECKS:
             check(name, False)
         #end for

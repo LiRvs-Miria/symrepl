@@ -1,6 +1,6 @@
-"""exec_algebra — 执行面会话编排放射（纯核，v5 家法对齐协议面 adapter）。
+"""session_lifecycle — 执行面会话生命周期核（纯核，v5 家法对齐协议面 adapter）。
 
-调试器后端可插拔（session.py 端口面），会话编排出端口契约定义、后端无关：
+调试器后端可插拔（session.py 端口面），会话生命周期由端口契约定义、后端无关：
 相位字母表、守卫矩阵、转移提交制、事件落靶全部住本册；*_backend.py 是壳——
 取数成 plain 值→guard→执行效果→resolve 提交。核内零 I/O、零原地突变、
 零裸字符串相位（ExecPhase ADT）。
@@ -28,7 +28,7 @@ class ExecPhase(Enum):
 
 
 class ExecState(NamedTuple):
-    """编排放射值：相位+世代票据。世代是守卫输入（stale 判定）故入核；
+    """生命周期状态值：相位+世代票据。世代是守卫输入（stale 判定）故入核；
     引用账本/断点表/轨迹节点是载荷数据，归壳私。"""
     phase: ExecPhase = ExecPhase.ENTRY
     generation: int = 0
