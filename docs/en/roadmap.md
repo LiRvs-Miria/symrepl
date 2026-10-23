@@ -114,6 +114,23 @@ manifest skeleton may be pulled ahead:
   `"debugServer"`; chaos tests fail cleanly with `terminated`, never a
   hang.
 
+### stdio/VS Code wiring (2026-10-23, cleanroom, done)
+
+- `--lldb-dir` optional at boot; the `lldbDir` launch argument carries
+  the toolchain dir. The extension stays zero-code;
+  `extensionKind: ["workspace"]` keeps the debug session
+  workspace-side over Remote-SSH (UI-side sessions break resource
+  mapping both ways).
+- Debugger-layer commands (`threads`/`stackTrace`/`scopes`/
+  `variables`/`continue`/`setBreakpoints`) self-loop forward without
+  adapter state transitions — breakpoints are settable in the
+  configuration phase (standard client timing).
+- `terminate` implemented (same two gates as `disconnect`); stack
+  frames carry DAP `source{name, path}`.
+- Real-client acceptance (VS Code over Remote-SSH): breakpoint stop at
+  L20, source display, stop button clean teardown. Rationale and
+  trace evidence in `docs/design-notes/server.md`.
+
 Known risks (planning pass 2026-10-05):
 
 - **stdio hygiene** is the sharpest edge: any stray write to fd 1 from

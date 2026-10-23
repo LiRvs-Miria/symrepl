@@ -53,18 +53,21 @@ ok = (res.state.phase == StateEnum.S1 and res.action is None and len(frames) == 
       and "S1" in frames[0]["body"]["detail"])
 check("step: S1 门 1003+detail 携相位名", ok)
 
-# resolve 成臂：Done → 键映射单帧，状态驻 S3
+# resolve 成臂：Done → 键映射单帧，状态驻 S3（钉 C：路径包 source，空路径省略）
 r = req_of("stackTrace", {"threadId": 1})
 action = ForwardRequest(req=r, cmd="stack_trace", params={"thread_id": 1, "levels": 20})
 res = resolve(ProtoState(phase=StateEnum.S3), action,
-              Done({"stack_frames": [{"id": 1000, "name": "main", "line": 4, "column": 5, "path": "/t.c"}],
-                    "total_frames": 1, "junk": "x"}))
+              Done({"stack_frames": [{"id": 1000, "name": "main", "line": 4, "column": 5, "path": "/t.c"},
+                                     {"id": 0, "name": "_start", "line": 0, "column": 0, "path": ""}],
+                    "total_frames": 2, "junk": "x"}))
 frames, _ = build_replies(res.frames, 1)
 ok = (res.state.phase == StateEnum.S3 and len(frames) == 1
       and frames[0]["success"] is True
-      and frames[0]["body"] == {"stackFrames": [{"id": 1000, "name": "main", "line": 4, "column": 5, "path": "/t.c"}],
-                                "totalFrames": 1})
-check("resolve: 成臂键映射（stack_frames→stackFrames，杂键滤除）", ok)
+      and frames[0]["body"] == {"stackFrames": [{"id": 1000, "name": "main", "line": 4, "column": 5,
+                                                 "source": {"name": "t.c", "path": "/t.c"}},
+                                                {"id": 0, "name": "_start", "line": 0, "column": 0}],
+                                "totalFrames": 2})
+check("resolve: 成臂键映射（stack_frames→stackFrames+source 包裹，杂键滤除）", ok)
 
 # resolve 败臂：Rejected → 单帧 2002（普通代理帧形，不烧双帧）
 res = resolve(ProtoState(phase=StateEnum.S3), action, Rejected("no_thread"))

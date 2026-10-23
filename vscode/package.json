@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "publisher": "symrepl",
   "license": "Apache-2.0 WITH LLVM-exception",
+  "extensionKind": ["workspace"],
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -31,6 +32,10 @@
               "target": {
                 "type": "string",
                 "description": "Path to the debuggee binary (linked with -lkleeRuntest)."
+              },
+              "lldbDir": {
+                "type": "string",
+                "description": "Toolchain directory containing lldb and lldb-server (e.g. /usr/lib/llvm-22/bin). Required for the spawned-adapter form (F5); optional when the adapter is started manually with --lldb-dir (debugServer form)."
               },
               "stopOnEntry": {
                 "type": "boolean",

@@ -12,6 +12,7 @@ slot 即状态：PendingLaunch 非空 = S2。结果代数=Frame=Reply|Event（�
 from collections.abc import Callable
 from enum import Enum, IntEnum
 from typing import NamedTuple, assert_never
+from urllib.parse import urlsplit
 from error import InternalErrCode, ProtoError
 
 
@@ -36,6 +37,7 @@ class Command(Enum):
     VARIABLES = "variables"
     CONTINUE = "continue"
     SET_BREAKPOINTS = "setBreakpoints"
+    TERMINATE = "terminate"
 #end class
 
 def match_command(cmd: str) -> "Command | None":
@@ -52,6 +54,7 @@ def match_command(cmd: str) -> "Command | None":
         case "variables":         return Command.VARIABLES
         case "continue":          return Command.CONTINUE
         case "setBreakpoints":    return Command.SET_BREAKPOINTS
+        case "terminate":         return Command.TERMINATE
         case _:                   return None
     #end match
 #end def
@@ -211,6 +214,9 @@ def validate_launch(args: dict):
             return f"launch requires a '{key}' path string"
         # 文件存在性检查未做（无实证决策，标注见 design-notes）
     #end for
+    v = args.get("lldbDir")
+    if v is not None and (not isinstance(v, str) or not v):
+        return "launch 'lldbDir' must be a non-empty path string"
     return None
 #end def
 
@@ -234,7 +240,8 @@ DEBUG_SPECS: dict[Command, DebugSpec] = {
         child_cmd="stack_trace",
         params=lambda args: {"thread_id": args.get("threadId", 0),
                              "levels": args.get("levels", 20)},
-        body=lambda result: {"stackFrames": result.get("stack_frames", []),
+        body=lambda result: {"stackFrames": [_dap_frame(f)
+                                             for f in result.get("stack_frames", [])],
                              "totalFrames": result.get("total_frames", 0)}),
     Command.SCOPES: DebugSpec(
         child_cmd="scopes",
@@ -257,7 +264,7 @@ DEBUG_SPECS: dict[Command, DebugSpec] = {
         body=lambda result: {"allThreadsContinued": result.get("all_threads_continued", True)}),
     Command.SET_BREAKPOINTS: DebugSpec(
         child_cmd="set_breakpoints",
-        params=lambda args: {"path": (args.get("source") or {}).get("path"),
+        params=lambda args: {"path": _fs_path((args.get("source") or {}).get("path")),
                              "lines": [bp.get("line")
                                        for bp in args.get("breakpoints", [])
                                        if isinstance(bp, dict)]},
@@ -267,8 +274,30 @@ DEBUG_SPECS: dict[Command, DebugSpec] = {
 }
 
 
+def _fs_path(p):
+    """客户端 source.path 线形状归一：带 scheme 的资源 URI 取文件系统路径分量
+    （vscode-remote://authority/home/... → /home/...，file:// 同款），纯路径原样过。"""
+    if isinstance(p, str) and "://" in p:
+        return urlsplit(p).path
+    return p
+#end def
+
+
+def _dap_frame(f):
+    """子帧 → DAP StackFrame：路径包 source 对象（VS Code 只认 frame.source.path，
+    帧级裸 path 被无视）；Source.name=文件名；空路径（无行信息的帧如 _start）
+    省略 source。"""
+    frame = {"id": f["id"], "name": f["name"], "line": f["line"], "column": f["column"]}
+    path = f.get("path") or ""
+    if path:
+        frame["source"] = {"name": path.rsplit("/", 1)[-1], "path": path}
+    #end if
+    return frame
+#end def
+
+
 def step_debug(pstate: ProtoState, req: ParsedRequest) -> StepResult:
-    """S3 调试命令路由：查表造 ForwardRequest；表外命令照走状态门。"""
+    """调试器层命令路由：查表造 ForwardRequest；表外命令照走状态门。"""
     command = req.command
     assert command is not None   # 窄化给检查器：unknown 在 parse 阶段拦下，step 永远收不到 None
     spec = DEBUG_SPECS.get(command)
@@ -334,6 +363,17 @@ def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
             # "terminated 是拆除副产品"帧序）
             return StepResult(state=pstate, action=TearDownChild(req=req))
 
+        case (StateEnum.S2 | StateEnum.S3, Command.TERMINATE):
+            # 收场第二门：terminate 与 disconnect 同形（拆除臂：先拆 child 后别，
+            # 双帧归 resolve=拆除后发）
+            return StepResult(state=pstate, action=TearDownChild(req=req))
+
+        case (_, Command.TERMINATE):
+            # 断路器：S0/S1（及 DEAD）无肉身=纯转移直达终态（与 disconnect 同形）
+            return StepResult(state=pstate._replace(phase=StateEnum.DEAD, slot=None),
+                              frames=(OkReply(request=req, payload={}),
+                                      Event(event="terminated", body={})))
+
         case (_, Command.DISCONNECT):
             # 断路器：S0/S1（及 DEAD）无肉身，无可拆=纯转移直达终态（偏离#5）；
             # 清 slot=丢弃整个状态；帧序=响应先、terminated 后（2026-10-15 裁决 a：
@@ -349,8 +389,9 @@ def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
                                                 "event not allowed in current state",
                                                 "launch_already_pending"),))
 
-        case (StateEnum.S3, _):
-            # S3 整层路由：调试命令的匹配与处理在 step_debug（与协议生命周期分离）
+        case (StateEnum.S2 | StateEnum.S3, _):
+            # 调试器层整层路由（S2 配置期含）：查表自回环转发子进程，不触发
+            # 适配器层状态迁移；表外命令照走状态门
             return step_debug(pstate, req)
 
         case _:

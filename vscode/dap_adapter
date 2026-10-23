@@ -1,8 +1,24 @@
 #!/bin/sh
 # VS Code zero-code adapter launcher (ADR-0003 decision 14, Linux-first):
-# exec the symrepl DAP server (cleanroom tree) on stdio.  A "debugServer"
-# launch.json entry connects to an already-running server instead —
-# that is how development and the nets drive it.  NOTE: schedule.py
-# requires --lldb-dir; wiring it into the extension config is deferred
-# with the VS Code application-scenario pin (2026-10-22).
-exec python3 "$(dirname "$0")/../src/server/schedule.py" "$@"
+# exec the symrepl DAP server (cleanroom tree) on stdio — VS Code spawns
+# this script as the adapter and speaks DAP over its stdin/stdout.
+# A "debugServer" launch.json entry connects to an already-running server
+# instead — that is how development and the nets drive it (start
+# schedule.py manually with --lldb-dir).  The spawned form takes the
+# toolchain dir from the launch.json "lldbDir" property (launch request
+# arguments); --lldb-dir at boot remains the debugServer-form default.
+SELF="$(readlink -f "$0")"
+DIR="$(dirname "$SELF")"
+# 树定位三级回退：repo/符号链接形态（扩展目录邻 src/）→ SYMREPL_HOME → 本机缺省
+# checkout 位（拷贝安装形态 VS Code spawn 不带自定义 env，launch.json 无通道设置）
+if [ -f "$DIR/../src/server/schedule.py" ]; then
+    SRV="$DIR/../src/server/schedule.py"
+elif [ -n "$SYMREPL_HOME" ] && [ -f "$SYMREPL_HOME/src/server/schedule.py" ]; then
+    SRV="$SYMREPL_HOME/src/server/schedule.py"
+elif [ -f "$HOME/github/symrepl/src/server/schedule.py" ]; then
+    SRV="$HOME/github/symrepl/src/server/schedule.py"
+else
+    echo "symrepl adapter: cannot locate schedule.py (set SYMREPL_HOME to the checkout)" >&2
+    exit 1
+fi
+exec python3 "$SRV" --stdio "$@"

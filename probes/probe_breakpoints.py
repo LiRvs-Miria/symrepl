@@ -6,7 +6,7 @@
 - P1 状态门：S1 来 setBreakpoints → 1003 拒
 - P2 全链：S3 setBreakpoints [20,21] → 两行 verified True+line int
 - P3 命中上报：continue → stopped(reason="breakpoint")+hitBreakpointIds 非空+threadId int
-- P4 第二停相面：stackTrace 帧0 落 get_sign.c line 20（path 非空）→ scopes(新世代帧 id)
+- P4 第二停相面：stackTrace 帧0 落 get_sign.c line 20（source.path 非空）→ scopes(新世代帧 id)
   → Locals 新世代引用 → variables 平铺（内容不钉）
 - P5 stale 真实触发：scopes(frameId=0)（旧世代 0）→ 2002 携 stale_reference
 - P6 替换语义行为钉：setBreakpoints [21] → continue → 停于 line 21
@@ -15,6 +15,14 @@
 - P8 收场链照旧：disconnect → [resp, terminated] → exit0；孤儿不残留
 RED 预期（契约）：P1-P5 FAIL（命令未知/断点不生效 continue 直通 exit）、P6 错位 FAIL、
 P7-P8 绿（生命周期事件已通）。
+
+VS Code 时序场景（2026-10-23 真客户端联调撞出，用户裁"调试器层整层路由"）：
+- V1 S2 配置期下断点（initialized 后、configDone 前——真客户端标准时序）→ 放行
+  verified True（现状：S2 状态门 1003 拒，断点从未注册）
+- V2 continue → 停于断点 reason=breakpoint（S2 下断点真实生效）
+- V3 stackTrace 帧0 落 get_sign.c line 20（与 S3 时序同一停相面）
+- V4 disconnect → resp+terminated → exit0（带 inferior 在场的收场照旧）
+RED 预期：V1-V3 FAIL（1003 → continue 直通 exit）、V4 绿（收场路独立）。
 """
 import socket, subprocess, time, sys, os, shutil, itertools
 from pathlib import Path
@@ -160,9 +168,9 @@ def breakpoints_chain():
         r, buf = recv_or_fail(s, buf, "P4 stackTrace resp")
         frames = ((r or {}).get("body") or {}).get("stackFrames") or []
         f0 = frames[0] if frames else {}
-        check(name + ": P4a 帧0 落 get_sign.c line 20（path 非空）",
+        check(name + ": P4a 帧0 落 get_sign.c line 20（source.path 非空）",
               r is not None and r.get("success") is True
-              and f0.get("line") == 20 and bool(f0.get("path")))
+              and f0.get("line") == 20 and bool((f0.get("source") or {}).get("path")))
         fid = f0.get("id") or 0
         dc.send(s, seq, "scopes", {"frameId": fid})
         r, buf = recv_or_fail(s, buf, "P4 scopes resp")
@@ -243,8 +251,168 @@ def breakpoints_chain():
 #end def
 
 
+def breakpoints_vscode_timing():
+    """VS Code 真客户端时序：断点下在 configurationDone 之前（S2 配置期）。"""
+    name = "VS Code 时序（S2 配置期下断点）"
+    p = start()
+    try:
+        s, buf = dc.connect("127.0.0.1", PORT)
+        seq = itertools.count(1)
+
+        dc.send(s, seq, "initialize", {"adapterId": "symrepl"})
+        r, buf = dc.recv(s, buf)
+        dc.send(s, seq, "launch", {"ktest": KT, "target": TG})
+        e1, buf = recv_or_fail(s, buf, "process 事件")
+        e2, buf = recv_or_fail(s, buf, "initialized 事件")
+        check(name + ": launch 两事件就位",
+              is_event(e1, "process") and is_event(e2, "initialized"))
+
+        # V1 ★断点在 configurationDone 之前（S2 配置期，真客户端标准时序）
+        dc.send(s, seq, "setBreakpoints",
+                {"source": {"path": SRC}, "breakpoints": [{"line": 20}]})
+        r, buf = recv_or_fail(s, buf, "S2 setBreakpoints resp")
+        bps = ((r or {}).get("body") or {}).get("breakpoints") or []
+        ok = (r is not None and r.get("success") is True and len(bps) == 1
+              and bps[0].get("verified") is True)
+        check(name + ": V1 S2 setBreakpoints 放行+verified True", ok)
+
+        dc.send(s, seq, "configurationDone")
+        got = []
+        for tag in ("放行帧1", "放行帧2", "放行帧3"):
+            f, buf = recv_or_fail(s, buf, tag)
+            if f is not None:
+                got.append(f)
+            #end if
+        #end for
+        check(name + ": 放行三帧收齐（双帧+stopped）",
+              sum(1 for f in got if f.get("type") == "response") == 2
+              and any(is_event(f, "stopped") for f in got))
+
+        # V2 S2 期下断点真实生效：continue → 停于断点
+        dc.send(s, seq, "continue")
+        b1, buf = burst(s, buf, ("V2 突发1", "V2 突发2", "V2 突发3"))
+        stop, sb = stop_body(b1)
+        check(name + ": V2 continue 停于断点 reason=breakpoint",
+              stop is not None and sb.get("reason") == "breakpoint")
+
+        # V3 停相面与 S3 时序同一形状：帧0 落 L20
+        tid = sb.get("threadId") or 1
+        dc.send(s, seq, "stackTrace", {"threadId": tid})
+        r, buf = recv_or_fail(s, buf, "V3 stackTrace resp")
+        f0 = (((r or {}).get("body") or {}).get("stackFrames") or [{}])[0]
+        check(name + ": V3 帧0 落 get_sign.c line 20（source.path 非空）",
+              f0.get("line") == 20 and bool((f0.get("source") or {}).get("path")))
+
+        # V4 收场照旧（inferior 停在场，走显式拆除臂）
+        dc.send(s, seq, "disconnect")
+        r3, buf = recv_or_fail(s, buf, "disconnect resp")
+        ok_d = (r3 is not None and r3.get("success") is True)
+        if ok_d:
+            e3, buf = recv_or_fail(s, buf, "terminated 事件")
+            ok_d = is_event(e3, "terminated")
+        #end if
+        check(name + ": V4 disconnect→[resp, terminated]→exit0", ok_d)
+        s.close()
+        code = p.wait(timeout=10)
+        check(name + ": 会话毕 exit=0", code == 0)
+        check(name + ": 无孤儿 inferior/lldb-server", no_orphans())
+    finally:
+        if p.poll() is None:
+            p.terminate(); p.wait(timeout=5)
+        #end if
+    #end try
+#end def
+
+
+def breakpoints_realclient_shapes():
+    """真客户端线形状：Remote-SSH URI 路径 + pending 断点 verified 真值。
+    现象链（trace 实证 2026-10-23）：vscode-remote:// URI 原样进 LLDB → pending
+    （零 location）→ IsValid() True → verified 谎报 True → 实心红点永不命中。
+    RED 预期（两钉未修）：V5 continue 停 L20 查 FAIL（URI→pending→直通 exit）、
+    V6 verified False 查 FAIL（谎报 True）；V5 的 resp 形状查现状碰巧 True。
+    修复=钉A 父面 URI 归一 + 钉B backend pending 如实报 False。"""
+    name = "真客户端线形状"
+    p = start()
+    try:
+        s, buf = dc.connect("127.0.0.1", PORT)
+        seq = itertools.count(1)
+
+        dc.send(s, seq, "initialize", {"adapterId": "symrepl"})
+        r, buf = dc.recv(s, buf)
+        dc.send(s, seq, "launch", {"ktest": KT, "target": TG})
+        e1, buf = recv_or_fail(s, buf, "process 事件")
+        e2, buf = recv_or_fail(s, buf, "initialized 事件")
+        check(name + ": launch 两事件就位",
+              is_event(e1, "process") and is_event(e2, "initialized"))
+
+        # V5 URI 形状路径（Remote-SSH 客户端线形状；authority 用 TEST-NET 地址）
+        uri = "vscode-remote://ssh-remote%2B203.0.113.50" + SRC
+        dc.send(s, seq, "setBreakpoints",
+                {"source": {"name": "get_sign.c", "path": uri},
+                 "lines": [20], "breakpoints": [{"line": 20}],
+                 "sourceModified": False})
+        r, buf = recv_or_fail(s, buf, "V5 URI setBreakpoints resp")
+        bps = ((r or {}).get("body") or {}).get("breakpoints") or []
+        check(name + ": V5a URI 路径 setBreakpoints 放行+verified True",
+              r is not None and r.get("success") is True and len(bps) == 1
+              and bps[0].get("verified") is True)
+        dc.send(s, seq, "configurationDone")
+        got = []
+        for tag in ("放行帧1", "放行帧2", "放行帧3"):
+            f, buf = recv_or_fail(s, buf, tag)
+            if f is not None:
+                got.append(f)
+            #end if
+        #end for
+        check(name + ": V5b 放行三帧收齐",
+              sum(1 for f in got if f.get("type") == "response") == 2
+              and any(is_event(f, "stopped") for f in got))
+        dc.send(s, seq, "continue")
+        b1, buf = burst(s, buf, ("V5 突发1", "V5 突发2", "V5 突发3"))
+        stop, sb = stop_body(b1)
+        check(name + ": V5c URI 断点真实生效 continue 停于 breakpoint",
+              stop is not None and sb.get("reason") == "breakpoint")
+        tid = sb.get("threadId") or 1
+        dc.send(s, seq, "stackTrace", {"threadId": tid})
+        r, buf = recv_or_fail(s, buf, "V5d stackTrace resp")
+        f0 = (((r or {}).get("body") or {}).get("stackFrames") or [{}])[0]
+        check(name + ": V5d 帧0 落 get_sign.c line 20",
+              f0.get("line") == 20 and bool((f0.get("source") or {}).get("path")))
+
+        # V6 pending 如实报：不存在路径 → verified False（谎报=红）
+        dc.send(s, seq, "setBreakpoints",
+                {"source": {"name": "nope.c", "path": "/nonexistent/nope.c"},
+                 "breakpoints": [{"line": 1}]})
+        r, buf = recv_or_fail(s, buf, "V6 坏路径 resp")
+        bps = ((r or {}).get("body") or {}).get("breakpoints") or []
+        check(name + ": V6 不存在路径 → verified False（pending 如实报）",
+              r is not None and r.get("success") is True and len(bps) == 1
+              and bps[0].get("verified") is False)
+
+        # 收场照旧（inferior 停在场，显式拆除臂）
+        dc.send(s, seq, "disconnect")
+        r3, buf = recv_or_fail(s, buf, "disconnect resp")
+        ok_d = (r3 is not None and r3.get("success") is True)
+        if ok_d:
+            e3, buf = recv_or_fail(s, buf, "terminated 事件")
+            ok_d = is_event(e3, "terminated")
+        #end if
+        check(name + ": disconnect→[resp, terminated]→exit0", ok_d)
+        s.close()
+        code = p.wait(timeout=10)
+        check(name + ": 会话毕 exit=0", code == 0)
+    finally:
+        if p.poll() is None:
+            p.terminate(); p.wait(timeout=5)
+        #end if
+    #end try
+#end def
+
+
 if __name__ == "__main__":
     breakpoints_chain()
+    breakpoints_vscode_timing()
+    breakpoints_realclient_shapes()
     print("=" * 30)
     print("ALL PASS" if not fails else f"{len(fails)} FAIL: {fails}")
     sys.exit(1 if fails else 0)

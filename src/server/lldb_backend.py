@@ -558,8 +558,9 @@ class Session:
     def set_breakpoints(self, path: str, lines: list[int]) -> list[dict]:
         """断点全量替换（DAP per-source 语义，参考简化随迁：单一全局断点集）。
         守卫：process 无→NOT_LAUNCHED；空 path→BAD_ARGS（类型域归 child）。
-        删旧凭册→逐行 BreakpointCreateByLocation；invalid→verified False；
-        valid→location address 的 line entry 解析 resolved+记册。
+        删旧凭册→逐行 BreakpointCreateByLocation；invalid 或 pending（零 location，
+        路径解析不到）→verified False 如实报；resolved→location address 的 line
+        entry 解析 resolved+记册。
         回断点行裸清单（{"breakpoints": …} 键重包归 child，家法同构）。"""
         err = guard_exec(self._exec, ExecTrigger.SET_BREAKPOINTS)
         if err is not None:
@@ -576,11 +577,15 @@ class Session:
         breakpoints = []
         for line in lines:
             bp = self.target.BreakpointCreateByLocation(path, line)
-            if not bp.IsValid():
+            if bp.IsValid():
+                self._own_breakpoint_ids.append(int(bp.GetID()))
+            #end if
+            if not bp.IsValid() or bp.GetNumLocations() == 0:
+                # pending（零 location）=未验证：谎报 True 会让客户端显示实心
+                # 红点却永不命中（真客户端 URI 形状路径实证）
                 breakpoints.append({"line": line, "verified": False})
                 continue
             #end if
-            self._own_breakpoint_ids.append(int(bp.GetID()))
             resolved = line
             if bp.GetNumLocations() > 0:
                 # resolved line 经 location 的地址回解析（SBBreakpointLocation 无 GetLineInfo）
