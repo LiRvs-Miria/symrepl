@@ -7,8 +7,9 @@ connection.
 
 ## Running
 
-    symrepl dap                # stdio — one client, one session
-    symrepl dap --port 47113   # single client on 127.0.0.1:47113
+    python3 src/server/schedule.py --stdio            # stdio — one client, one session
+    python3 src/server/schedule.py --port 47113 --lldb-dir /usr/lib/llvm-22/bin
+    # (see `python3 src/server/schedule.py --help`; --lldb-dir = toolchain dir)
 
 Lifecycle: `initialize` → `launch` (response withheld) → `initialized`
 event → `setBreakpoints`/… → `configurationDone` → launch response →

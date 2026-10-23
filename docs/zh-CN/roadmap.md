@@ -108,6 +108,35 @@ mock-debug 的 DAP 子集；分支追踪经 `stopOnBranch` 与自定义请求
 - **一次性 CLI 路径保持冻结**；把它迁移到 service 子进程明确不在 M2
   范围内（M3 再评估）。
 
+## branchTrace 重定形与砍裁/押后（2026-10-21，cleanroom 转正期裁决）
+
+> 2026-10-16 起 cleanroom 转正工程整体重写 M2 服务面；重建期对原 M2 切片
+> 做出如下实质裁决（rationale 见 `docs/design-notes/server.md`）：
+
+- **stepping 押后**（原 M2-d 保留地位，M2 收尾后实现）：回放核=预扫描插桩+
+  bp+continue 推进+报告产出，交互步进是断点停下后的**用户调试策略**，不承重
+  当前阶段；DAP 家法"可选才广告"，不实现即不广告。M2-a 的 SendAsyncInterrupt
+  spike 成果存档；实现时需长跑靶子（get_sign 秒退无 running 窗口）。
+- **pause/terminate 当前不实现**（原 M2-b1 一部分）：收场=disconnect 一条路，
+  pause 救急面被 disconnect 覆盖；terminate 到来答 unknown。需求实证出现再议。
+- **`replay.branchTrace` 命令砍**（原 M2-c 一部分）：轨迹报告改为收场自动
+  汇总 output 事件（纯被动，无新命令）；branchTrace 语义重定形为
+  **预扫描引导回放**——预扫描站点集（`is_conditional`）是 target 的唯一
+  职责（下断点依据），断点命中的 actual（pc/function/mnemonic/符号值/调用栈）
+  据实记录，报告含路径线+节点详情（含符号值与 ktest 解采样点的一致性注记）。
+- **值/路径两层校验劈分**：值一致性（符号值 vs ktest 解）随回放报告产出；
+  路径一致性校验（建模/求解）=M4 轨迹分析的一部分，消费报告的独立分析层
+  （见 M4）。
+
+## Cleanroom 转正完成（2026-10-22）
+
+cleanroom 重写即产品树，原地转正：`src/` 现在承载 DAP 面（`server/`，
+按 checkout 脚本运行）、回放代数（`replay/`）、15 网（`probes/`）与
+手动客户端（`client/`）。取代裁决走到底：原 M1 CLI 回放路径
+（`symrepl <ktest>`、`cli.py`、M1 模块及其测试）同日退役——回放能力
+经 DAP 交付（见 `docs/zh-CN/dap.md`；M1 存档于 git 历史）。`symrepl`
+命令随之消失；待真实消费方需要 import 时再做包化。
+
 ## M3 — LLVM IR / DWARF 映射
 
 - 经 DWARF 把路径决策映射回 IR 位置与源码行。
@@ -115,6 +144,11 @@ mock-debug 的 DAP 子集；分支追踪经 `stopOnBranch` 与自定义请求
 ## M4 — 分析叠加层
 
 - 回放轨迹上的覆盖率与污点叠加。
+- **路径一致性校验**（2026-10-21 扩员，用户裁）：消费 branchTrace 报告做
+  路径建模、求解与一致性校验——轨迹分析的一部分。KLEE 路径约束经公开
+  `.kquery` 消费；SMT 求解若破"薄桥/零依赖"定位，按 ptrfuzz 模式独立成库
+  依赖项目（届时再裁）。回放器内预铺的比对代数（`local-cleanroom/replay/
+  branches.py` 的 `equal`/`match_path`）由此层消费，不接进回放链路。
 
 ## 生态
 
