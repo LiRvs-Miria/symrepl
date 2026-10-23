@@ -14,9 +14,10 @@ stdio 或单条 TCP 连接。
 生命周期：`initialize` → `launch`（响应扣留）→ `initialized` 事件 →
 `setBreakpoints`/… → `configurationDone` → launch 响应 →
 `stopped`/`exited`/`terminated` 事件。调试器层命令（`threads`/
-`stackTrace`/`scopes`/`variables`/`continue`/`setBreakpoints`）自回环：
-只转发子进程，不迁移适配器状态机——断点可在配置期（标准客户端时序）
-与任一停点后设置。能力位已冻结（ADR-0003 决策 4）：
+`stackTrace`/`scopes`/`variables`/`continue`/`setBreakpoints`/`next`/
+`stepIn`/`stepOut`）自回环：只转发子进程，不迁移适配器状态机——断点
+可在配置期（标准客户端时序）与任一停点后设置；步进为同步阻塞（停相
+在步进响应之后经事件泵到达，reason `step`）。能力位已冻结（ADR-0003 决策 4）：
 `supportsConfigurationDoneRequest` 与 `supportsTerminateRequest`；
 `evaluate`/`completions` 推迟到 M2 之后。
 

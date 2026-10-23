@@ -46,6 +46,7 @@ _created = False          # 单进程单 debugger 的守门旗
 _STATE_TABLE: dict = {}   # 枚举常量→KnownState（load 后灌入，此后纯查表）
 _RUNNING_STATE: int = 0   # 同上（classify_event 用）
 _BREAKPOINT_REASON: int = 0   # 同上（stop_reason_label 用）
+_PLAN_COMPLETE_REASON: int = 0   # 同上（stop_reason_label 用：步进完成停相）
 
 
 # ---------- 纯核代数（plain 值进出；结果/错误当值返回；无 SB 调用、无环境读写） ----------
@@ -111,9 +112,13 @@ def classify_event(is_process: bool, proc_id: int | None,
 def stop_reason_label(stop_reason: int, data_count: int,
                       data_first: int) -> tuple[str, list[int]]:
     """停相 reason 推断（纯）：断点命中携 bp id（GetStopReasonDataAtIndex(0)，
-    LLDB 约定）；data 计数 0 时不取（越界防）；余者 exception。"""
+    LLDB 约定）；data 计数 0 时不取（越界防）；PlanComplete=step（步进完成）；
+    余者 exception。"""
     if stop_reason == _BREAKPOINT_REASON:
         return "breakpoint", ([data_first] if data_count > 0 else [])
+    #end if
+    if stop_reason == _PLAN_COMPLETE_REASON:
+        return "step", []
     #end if
     return "exception", []
 #end def
@@ -141,13 +146,14 @@ def find_lldb_server(search_dirs: list[str]) -> LldbServer:
 
 def _ingest_enums(lldb) -> None:
     """枚举常量→plain 表（load 后一次性；此后判定纯查表）。"""
-    global _STATE_TABLE, _RUNNING_STATE, _BREAKPOINT_REASON
+    global _STATE_TABLE, _RUNNING_STATE, _BREAKPOINT_REASON, _PLAN_COMPLETE_REASON
     _STATE_TABLE = {lldb.eStateStopped: KnownState.STOPPED,
                     lldb.eStateExited: KnownState.EXITED,
                     lldb.eStateCrashed: KnownState.CRASHED,
                     lldb.eStateDetached: KnownState.DETACHED}
     _RUNNING_STATE = int(lldb.eStateRunning)
     _BREAKPOINT_REASON = int(lldb.eStopReasonBreakpoint)
+    _PLAN_COMPLETE_REASON = int(lldb.eStopReasonPlanComplete)
 #end def
 
 
@@ -352,6 +358,43 @@ class Session:
         #end try
         self._commit(resolve_exec(old, step, ExecOk()))   # 世代有进=清账随提交（效果败不进世代）
         return {"all_threads_continued": True}
+    #end def
+
+    def _step_resume(self, trigger: ExecTrigger, sb_step) -> dict:
+        """step 族公共体（同步阻塞，2026-10-23 用户钉）：守卫→线程步进（等步完
+        才返）→提交。resume 家法照 continue_（提案提交制，世代+1）；完成停相
+        由事件泵消费，response 不携停相。"""
+        old = self._exec
+        step = step_exec(old, trigger)
+        if step.error is not None:
+            raise step.error
+        #end if
+        try:
+            err = sb_step(self.process.GetThreadAtIndex(0))
+            # 绑定返回面不统一：StepOver/StepInto/StepOut 成功返 None（非 SBError）
+            if err is not None and err.Fail():
+                raise SessionError(SessionErrCode.RESUME_FAILED, repr(err))
+            #end if
+        except Exception as e:
+            raise SessionError(_physical(e, SessionErrCode.RESUME_FAILED), repr(e)) from e
+        #end try
+        self._commit(resolve_exec(old, step, ExecOk()))
+        return {}
+    #end def
+
+    def step_next(self) -> dict:
+        """next=步过（StepOver，同步阻塞）。"""
+        return self._step_resume(ExecTrigger.STEP_NEXT, lambda t: t.StepOver())
+    #end def
+
+    def step_in(self) -> dict:
+        """stepIn=步入（StepInto，同步阻塞）。"""
+        return self._step_resume(ExecTrigger.STEP_IN, lambda t: t.StepInto())
+    #end def
+
+    def step_out(self) -> dict:
+        """stepOut=步出（StepOut，同步阻塞）。"""
+        return self._step_resume(ExecTrigger.STEP_OUT, lambda t: t.StepOut())
     #end def
 
     def poll_events(self) -> list[dict]:

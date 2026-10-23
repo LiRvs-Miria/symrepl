@@ -17,9 +17,11 @@ Lifecycle: `initialize` → `launch` (response withheld) → `initialized`
 event → `setBreakpoints`/… → `configurationDone` → launch response →
 `stopped`/`exited`/`terminated` events.  Debugger-layer commands
 (`threads`/`stackTrace`/`scopes`/`variables`/`continue`/
-`setBreakpoints`) self-loop: they forward to the child without moving
-the adapter state machine — breakpoints may be set in the
-configuration phase (standard client timing) and after any stop.
+`setBreakpoints`/`next`/`stepIn`/`stepOut`) self-loop: they forward to
+the child without moving the adapter state machine — breakpoints may be
+set in the configuration phase (standard client timing) and after any
+stop; stepping is synchronous (the stop follows the step response via
+the event pump, reason `step`).
 Capabilities are frozen (ADR-0003 decision 4):
 `supportsConfigurationDoneRequest` and `supportsTerminateRequest`;
 `evaluate`/`completions` are deferred past M2.

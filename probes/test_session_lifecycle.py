@@ -61,6 +61,9 @@ def expected_matrix():
     return {
         ExecTrigger.LAUNCH:          {e: None, es: al, s: al, r: al, d: al},
         ExecTrigger.CONTINUE:        {e: ns, es: ns, s: None, r: ns, d: ns},
+        ExecTrigger.STEP_NEXT:       {e: ns, es: ns, s: None, r: ns, d: ns},
+        ExecTrigger.STEP_IN:         {e: ns, es: ns, s: None, r: ns, d: ns},
+        ExecTrigger.STEP_OUT:        {e: ns, es: ns, s: None, r: ns, d: ns},
         ExecTrigger.REPORT_ENTRY_STOP: {e: nl, es: None, s: nl, r: nl, d: nl},
         ExecTrigger.STACK_TRACE:     {e: ns, es: None, s: None, r: ns, d: ns},
         ExecTrigger.SCOPES:          {e: ns, es: ns, s: None, r: ns, d: ns},
@@ -121,6 +124,17 @@ def step_continue():
     s = step_exec(st0, ExecTrigger.CONTINUE)
     return (s.error is None and s.effect == ExecEffect.RESUME_INFERIOR
             and s.state == ExecState(ExecPhase.RUNNING, 3))
+#end def
+
+def step_resume_family():
+    """step 族三触发=resume 家法同形：提案 RUNNING 世代+1，effect 同 continue
+    （2026-10-23 契约：世代推进照 continue 一次，ingest 停相不触碰世代）。"""
+    st0 = ExecState(ExecPhase.STOPPED, 2)
+    outs = [step_exec(st0, t) for t in (ExecTrigger.STEP_NEXT,
+                                        ExecTrigger.STEP_IN,
+                                        ExecTrigger.STEP_OUT)]
+    return (all(o.error is None and o.effect == ExecEffect.RESUME_INFERIOR
+                and o.state == ExecState(ExecPhase.RUNNING, 3) for o in outs))
 #end def
 
 def resolve_continue():
@@ -205,6 +219,7 @@ CHECKS = [
     ("step REPORT_ENTRY_STOP：effect=FINISH_CONFIG 提案=STOPPED", step_finish),
     ("resolve REPORT_ENTRY_STOP：Ok 提交 / Fail 留 ENTRY_STOPPED", resolve_finish),
     ("step CONTINUE：effect=RESUME_INFERIOR 提案=RUNNING 世代+1", step_continue),
+    ("step 族三触发同形：提案=RUNNING 世代+1 effect=RESUME_INFERIOR", step_resume_family),
     ("resolve CONTINUE：Ok 提交 / Fail 留 STOPPED 世代不进（行为差③钉）", resolve_continue),
     ("step 守卫败臂：error 携码、提案=原值、effect 空", step_guard_fail),
     ("resolve 对守卫败臂 step=核误用，大声失败", resolve_error_step),
@@ -217,7 +232,8 @@ CHECKS = [
 ]
 CHECKS += [(f"guard 矩阵逐行：{name}×五相位（冻结现状）",
             lambda n=name: matrix_ok(ExecTrigger[n]))
-           for name in ("LAUNCH", "CONTINUE", "REPORT_ENTRY_STOP", "STACK_TRACE",
+           for name in ("LAUNCH", "CONTINUE", "STEP_NEXT", "STEP_IN", "STEP_OUT",
+                        "REPORT_ENTRY_STOP", "STACK_TRACE",
                         "SCOPES", "VARIABLES", "THREADS", "SET_BREAKPOINTS")]
 
 if __name__ == "__main__":

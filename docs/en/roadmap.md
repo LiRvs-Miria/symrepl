@@ -152,15 +152,15 @@ Known risks (planning pass 2026-10-05):
 > original M2 slices (rationale in
 > `docs/design-notes/server.md`):
 
-- **stepping deferred** (the original M2-d keeps its slot, to be
-  implemented after the M2 wrap-up): the replay core = pre-scan
-  instrumentation + bp + continue driving + report production;
-  interactive stepping is the **user's debugging strategy after a
-  breakpoint stop** and is not load-bearing for the current phase.
-  DAP house rule "advertise only what exists" — unimplemented means
-  unadvertised. The M2-a `SendAsyncInterrupt` spike results stay
-  archived; resuming this work needs a long-running target fixture
-  (get_sign exits too fast to expose a running window).
+- **stepping ~~deferred~~ implemented (2026-10-23; the original M2-d
+  fulfilled after the M2 wrap-up)**: `next`/`stepIn`/`stepOut` mapped to
+  synchronous `SBThread` step operations (`pause` stays deferred — it
+  needs a long-running target fixture; get_sign exits too fast to
+  expose a running window). The replay core = pre-scan instrumentation
+  + bp + continue driving + report production; interactive stepping is
+  the **user's debugging strategy after a breakpoint stop**. DAP house
+  rule "advertise only what exists". See `docs/design-notes/server.md`
+  (step 族, 2026-10-23).
 - **pause/terminate not implemented for now** (part of the original
   M2-b1): teardown = the single `disconnect` path, which also covers
   pause's rescue role; `terminate` replies `unknown` if it arrives.

@@ -36,9 +36,12 @@ class ExecState(NamedTuple):
 
 
 class ExecTrigger(Enum):
-    """端口面原语的触发词汇（八命令；poll_events 是泵不走守卫门）。"""
+    """端口面原语的触发词汇（十一命令；poll_events 是泵不走守卫门）。"""
     LAUNCH = "launch"
     CONTINUE = "continue"
+    STEP_NEXT = "step_next"
+    STEP_IN = "step_in"
+    STEP_OUT = "step_out"
     REPORT_ENTRY_STOP = "report_entry_stop"
     THREADS = "threads"
     STACK_TRACE = "stack_trace"
@@ -119,6 +122,15 @@ _GUARDS: dict[ExecTrigger, tuple[frozenset[ExecPhase], SessionErrCode, str]] = {
     ExecTrigger.CONTINUE: (
         frozenset({ExecPhase.STOPPED}),
         SessionErrCode.NOT_STOPPED, "continue"),
+    ExecTrigger.STEP_NEXT: (
+        frozenset({ExecPhase.STOPPED}),
+        SessionErrCode.NOT_STOPPED, "step over"),
+    ExecTrigger.STEP_IN: (
+        frozenset({ExecPhase.STOPPED}),
+        SessionErrCode.NOT_STOPPED, "step into"),
+    ExecTrigger.STEP_OUT: (
+        frozenset({ExecPhase.STOPPED}),
+        SessionErrCode.NOT_STOPPED, "step out"),
     ExecTrigger.REPORT_ENTRY_STOP: (
         frozenset({ExecPhase.ENTRY_STOPPED}),
         SessionErrCode.NOT_LAUNCHED, "finish configuration"),
@@ -148,6 +160,9 @@ _TRANSITIONS: dict[ExecTrigger, tuple[ExecEffect, ExecPhase, int]] = {
     ExecTrigger.LAUNCH: (ExecEffect.LAUNCH_INFERIOR, ExecPhase.ENTRY_STOPPED, 0),
     ExecTrigger.REPORT_ENTRY_STOP: (ExecEffect.FINISH_CONFIG, ExecPhase.STOPPED, 0),
     ExecTrigger.CONTINUE: (ExecEffect.RESUME_INFERIOR, ExecPhase.RUNNING, 1),
+    ExecTrigger.STEP_NEXT: (ExecEffect.RESUME_INFERIOR, ExecPhase.RUNNING, 1),
+    ExecTrigger.STEP_IN: (ExecEffect.RESUME_INFERIOR, ExecPhase.RUNNING, 1),
+    ExecTrigger.STEP_OUT: (ExecEffect.RESUME_INFERIOR, ExecPhase.RUNNING, 1),
 }
 #end dict
 

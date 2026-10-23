@@ -478,6 +478,53 @@ bp L20→next→L21→stepIn→get_sign→stepOut→main L21 已验证可观测�
 合流；"协议砖/引擎件交替制"随横向收尾自然终结。roadmap en/zh 需编辑性修订
 （M2-d 押后/M2-c 改写/一致性校验归 M4——branchTrace 关账后一并做）。
 
+## step 族（2026-10-23 定案，原 M2-d 兑现；2026-10-21 押后钉解除）
+
+**模糊架构两钉（用户，2026-10-23）**：
+- **同步阻塞模型**：SBThread.StepOver/StepInto/StepOut 等步完才返（参考
+  session.py:338 同构）；child_request 等待，停相随响应面之后由事件泵到达
+  （SB 完成停相进 listener 队列，handle 下轮 poll 消费），无 running 可观测
+  窗口。代价=步进耗时期间子进程无响应面（回放工作负载步进皆短步，可接受；
+  撞长步再议异步）。
+- **三件起步**：next/stepIn/stepOut；pause 维持押后（需长跑靶子，get_sign
+  秒退无 running 窗口——2026-10-21 悬钉维持）；restart/stepBack 不做。
+
+**定形（撞到即裁记录）**：
+- **核（session_lifecycle）**：ExecTrigger 三成员（step_next/step_in/
+  step_out）+_GUARDS 三行（允许相位={STOPPED}，同 CONTINUE，NOT_STOPPED）+
+  _TRANSITIONS 三行（照 CONTINUE 形：RESUME_INFERIOR→RUNNING，世代 +1——
+  resume 家法：世代推进照 continue 一次，ingest 停相不触碰世代，相位账
+  STOPPED→RUNNING→(ingest)→STOPPED）。ingest_exec 零改动（StopObserved
+  通用臂天然承接 step 停相；断点 CaptureNode 臂按 reason 分派不误触）。
+- **backend（lldb_backend）**：step_next/step_in/step_out 三函数（守卫→
+  GetThreadAtIndex(0) 同步步进→resolve+commit 照 continue_ 模式）；stop
+  reason 新映射 _PLAN_COMPLETE_REASON→"step"（load 时灌入，同
+  _BREAKPOINT_REASON 家法）。
+- **child（session）**：handle 三门牌（"next"/"step_in"/"step_out"）+
+  DebugBackend Protocol 三签名；响应体 {}。
+- **父面（adapter）**：Command 三成员（next/stepIn/stepOut）+match_command
+  三 case+DEBUG_SPECS 三行（params={}——threadId 单线程照 continue 家法
+  忽略；body={}——DAP step 响应无 body）；S2|S3 整层路由现成转发。
+- **网（probe_step.py，5703，真饵）**：存痕链复活——launch→setBreakpoints
+  L20→configDone→continue→bp 停 L20→next→停 L21→stepIn→get_sign 函数体
+  →stepOut→回 main L21。8 查：三命令响应 success 无 body/stopped
+  reason=step/帧0 落点三连/收场照旧。RED 现状=unknown command 全红（命令
+  缺位形）。
+
+**落地记录（2026-10-23，三小步转录）**：RED 8 FAIL/2 PASS（缺位形）→
+①核（ExecTrigger 三成员+守卫三行+转移三行照 CONTINUE 形）——纯核网先铺钉
+（test_session_lifecycle 增 step_resume_family 同形钉+矩阵三行）RED 缺位形→
+ALL PASS；②backend+child+父面——probe_step **网炸一枚**：SB 绑定返回面
+不统一——StepOver/StepInto/StepOut 成功返 **None**（非 SBError），
+err.Fail() 炸 AttributeError→2002 resume_failed，而步进本体已执行（T2/T3
+行为面同网绿）——同网双面各逮一格（响应面 T1×行为面 T2）——归一
+None=无错形态→**ALL PASS**（含 T6 世代钉：next 后旧 frameId
+stale_reference，resume 家法世代语义真线兑现）；③全量 20 网 rc=0+pytest
+20/20。**撞到即裁两笔**：threadId 单线程照 continue 家法忽略；Protocol
+声明面欠账（continue_/wait_state/exit_code continue 砖已欠+step 三签名
+未入——结构性满足照跑）挂账。dap.md 命令清单/roadmap 押后注记/进度档/AGENTS
+20 网同步。
+
 ## branchTrace 预扫描引导回放+报告（2026-10-21 定案，M2 收尾件）
 
 **定案链（用户，2026-10-21 三段演进）**：纯被动汇总（AI 提，废——用户：

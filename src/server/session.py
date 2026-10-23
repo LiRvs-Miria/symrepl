@@ -167,6 +167,12 @@ def handle(protocol_out, msg: dict) -> None:
         _variables(protocol_out, msg)
     elif cmd == "continue":
         _run(protocol_out, msg, lambda: _backend_ready().continue_())
+    elif cmd == "next":
+        _run(protocol_out, msg, lambda: _backend_ready().step_next())
+    elif cmd == "step_in":
+        _run(protocol_out, msg, lambda: _backend_ready().step_in())
+    elif cmd == "step_out":
+        _run(protocol_out, msg, lambda: _backend_ready().step_out())
     elif cmd == "set_breakpoints":
         _set_breakpoints(protocol_out, msg)
     else:

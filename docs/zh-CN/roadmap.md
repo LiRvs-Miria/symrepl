@@ -127,10 +127,11 @@ mock-debug 的 DAP 子集；分支追踪经 `stopOnBranch` 与自定义请求
 > 2026-10-16 起 cleanroom 转正工程整体重写 M2 服务面；重建期对原 M2 切片
 > 做出如下实质裁决（rationale 见 `docs/design-notes/server.md`）：
 
-- **stepping 押后**（原 M2-d 保留地位，M2 收尾后实现）：回放核=预扫描插桩+
-  bp+continue 推进+报告产出，交互步进是断点停下后的**用户调试策略**，不承重
-  当前阶段；DAP 家法"可选才广告"，不实现即不广告。M2-a 的 SendAsyncInterrupt
-  spike 成果存档；实现时需长跑靶子（get_sign 秒退无 running 窗口）。
+- **stepping ~~押后~~ 已实现（2026-10-23，原 M2-d 在 M2 收尾后兑现）**：
+  `next`/`stepIn`/`stepOut` 映射到同步 `SBThread` 步进操作（`pause` 维持
+  押后——需长跑靶子，get_sign 秒退无 running 窗口）。回放核=预扫描插桩+
+  bp+continue 推进+报告产出，交互步进是断点停下后的**用户调试策略**；DAP
+  家法"可选才广告"。详见 `docs/design-notes/server.md`（step 族，2026-10-23）。
 - **pause/terminate 当前不实现**（原 M2-b1 一部分）：收场=disconnect 一条路，
   pause 救急面被 disconnect 覆盖；terminate 到来答 unknown。需求实证出现再议。
 - **`replay.branchTrace` 命令砍**（原 M2-c 一部分）：轨迹报告改为收场自动

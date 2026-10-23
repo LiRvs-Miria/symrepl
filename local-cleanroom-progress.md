@@ -46,7 +46,7 @@
 - [x] 砖4 收场路（✅ 2026-10-23 关账：三小步落地+档案收口——见已关账表；**协议线清零**）
 - [x] 砖5 child 死路混沌探针（✅ 2026-10-23 与砖4 合并关账：probe_chaos 26 查即砖5，C1/C2/C3 三路 ALL PASS——见已关账表）
 
-### stdio/VS Code（进行中，分支 stdio-vscode；main=afd0a73 合并点）
+### stdio/VS Code（✅ 2026-10-23 已并回 main=f94a770，分支 stdio-vscode 本地+远端已删）
 - [x] lldbDir 参数化（✅ 2026-10-23 全四步关账：契约落纸 design-notes「stdio/VS Code 接线」——**A 案用户裁**：lldbDir 经 launch 请求参数携带+argv `--lldb-dir` 降 optional 作 boot 缺省+decision 14 零码保持+E4 argv-required 字面修订；AI 攻击四枚自收：码语义照 ktest refused 家法/dap_adapter 缺 --stdio 照修/package.json lldbDir 声明 optional/launch 优先 boot 缺省。**步1 核+壳转录**：validate_launch lldbDir 形状行+argparse 降 optional+run_effect 解析臂+spawn_child 用解析值；probe_lldbdir 5699 RED 11→12/12（网炸一枚自愈：stdio stderr 分道，probe_stdio 家法）。**步2 vscode 面**：package.json lldbDir 属性+dap_adapter `--stdio` 硬编码+树定位三级回退。**步3 真客户端联调（人在环，trace 抓包定案）四层钉**：①S2 状态门拒断点——**用户裁调试器层/适配器层劈分**（调试器层命令自回环转发不迁状态，整层路由 (S3,_)→(S2|S3,_)，probe_breakpoints 增 VS Code 时序场景 V1-V4）；②URI 形状+pending 谎报两钉（Remote-SSH 客户端 source.path=vscode-remote:// URI→LLDB pending 零 location→IsValid 谎报 verified True——**钉 A** 父面 _fs_path URI 归一/**钉 B** backend verified=IsValid∧GetNumLocations>0，realclient_shapes 场景 V5/V6）；③会话侧——trace 实证 UI 侧会话（URI 入+未知源出），**用户裁 extensionKind ["workspace"]**+新窗口重扫，断点转普通路径到达；④terminate 广告钉兑现——**用户裁实现**（与 disconnect 两门同形：S2|S3 拆除臂/S0|S1 断路器，probe_terminate 5701 T1/T2）；⑤stackFrame.source 包裹——**钉 C** 线格式映射归父面（STACK_TRACE body_fn _dap_frame，路径包 source{name,path}，空路径省略；网钉勘误三处=形状钉两网同错盲区，真客户端=第四张网）。**终验**：用户亲测 F5 直启+debugServer 两形态——断点停 L20、源码高亮、停止按钮一次到位（"非常完美"）；pytest 20/20+19 网 rc=0 终版 sweep。**步4 档案**：design-notes 四层钉节/进度档/dap.md en+zh（--lldb-dir optional+lldbDir 参数+debugServer 引 probes/+branchTrace 纯被动勘误）/roadmap/AGENTS.md 网数 19 同步+llvm-19 卸载注记；**待提交）
 - [x] stdio 模式（✅ 2026-10-21：schedule `--stdio` flag+`amain_stdio`——handle 传输无关直接接管 stdin/stdout，单"连接"=进程即会话，信号=读侧 feed_eof；probe_stdio 6/6 绿（握手/状态门/真链/收场/stdin-EOF/卫生）+四网回归绿）
 - [x] roadmap en/zh 编辑性修订（✅ 2026-10-21 已随 7ba89f2：branchTrace 重定形/stepping 押后非砍死/一致性校验归 M4）
@@ -54,10 +54,11 @@
 
 ### 引擎线（对账网随件裁：E1 oracle 对账 / E2 起取代无 oracle）
 - [x] ~~E4 会话编排续刀~~（✅ 2026-10-22 关账：编演建模收敛以代数化兑现——session_lifecycle 纯核册+壳瘦身+test_session_lifecycle 25 查；trace_report 输出事件流早已随 branchTrace 落地——见已关账表；**引擎线清零，交替制终结**）
+- [x] stepping（✅ 2026-10-23 关账：原 M2-d 兑现，2026-10-21 押后钉解除——用户两钉**同步阻塞模型**+**三件起步**（next/stepIn/stepOut；pause 维持押后需长跑靶子）。核（ExecTrigger 三成员+守卫三行={STOPPED}+转移三行照 CONTINUE 形 RESUME_INFERIOR→RUNNING 世代+1）+backend（_step_resume 公共体同步阻塞+stop_reason_label 增 PlanComplete→"step"）+child 三门牌（next/step_in/step_out）+父面三命令（threadId 忽略照 continue 家法，body 无）；**网炸一枚**：SB 绑定返回面不统一——StepOver 系成功返 None 非 SBError，err.Fail() 炸响应面而步进本体已执行（同网响应面/行为面各逮一格）→归一 None=无错形态；世代语义真线兑现（T6：next 后旧 frameId→2002 stale_reference，resume 家法）；真饵链=存痕复活 bp L20→next→L21→stepIn→get_sign L11→stepOut→main L21；证据=probe_step 5703 RED 8 FAIL→ALL PASS+pytest 20/20+**20 网 rc=0** sweep；撞到即裁：Protocol 声明面欠账挂账（continue_ 亦未入册，结构性满足照跑））
 
 ## 挂账（未决小钉，撞结再裁）
 
-- **stepping 押后钉**（2026-10-21 用户重定性：非砍死——断点停下后的用户调试策略，原 M2-d 地位恢复，M2 收尾后实现，需长跑靶子）；**pause 押后钉**（terminate 已兑现 2026-10-23 见 lldbDir 关账行④，pause 仍不实现，需求实证再议）——链路知识存 server/design-notes step 族节
+- ~~**stepping 押后钉**~~（✅ 2026-10-23 兑现关账：next/stepIn/stepOut 同步阻塞三件——见引擎线关账行；**pause 维持押后**：需长跑靶子，get_sign 秒退无 running 窗口）；**pause 押后钉**（terminate 已兑现 2026-10-23，pause 仍不实现，需求实证再议）——链路知识存 server/design-notes step 族节；**Protocol 声明面欠账**（DebugBackend 缺 continue_/wait_state/exit_code/step×3——结构性满足照跑，补账挂账）
 
 - ~~**stdio/VS Code 押后钉**~~（✅ 2026-10-23 兑现：lldbDir 参数化+真客户端联调全链贯通——见待办关账行；`--stdio`/dap_adapter/lldbDir/extensionKind 全部就位）
 - **DAP 面入库钉**：ptrfuzz 或他者要 import 树时再包化（pyproject 现为 dev-only，无可安装包；M1 已退役，库面届时从 cleanroom 定形）

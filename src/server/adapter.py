@@ -38,6 +38,9 @@ class Command(Enum):
     CONTINUE = "continue"
     SET_BREAKPOINTS = "setBreakpoints"
     TERMINATE = "terminate"
+    NEXT = "next"
+    STEP_IN = "stepIn"
+    STEP_OUT = "stepOut"
 #end class
 
 def match_command(cmd: str) -> "Command | None":
@@ -55,6 +58,9 @@ def match_command(cmd: str) -> "Command | None":
         case "continue":          return Command.CONTINUE
         case "setBreakpoints":    return Command.SET_BREAKPOINTS
         case "terminate":         return Command.TERMINATE
+        case "next":              return Command.NEXT
+        case "stepIn":            return Command.STEP_IN
+        case "stepOut":           return Command.STEP_OUT
         case _:                   return None
     #end match
 #end def
@@ -262,6 +268,18 @@ DEBUG_SPECS: dict[Command, DebugSpec] = {
         child_cmd="continue",
         params=lambda args: {},                      # 参考参数忽略（单线程全续）
         body=lambda result: {"allThreadsContinued": result.get("all_threads_continued", True)}),
+    Command.NEXT: DebugSpec(
+        child_cmd="next",
+        params=lambda args: {},                      # threadId 忽略（单线程契约）
+        body=lambda result: {}),                     # DAP step 响应无 body
+    Command.STEP_IN: DebugSpec(
+        child_cmd="step_in",
+        params=lambda args: {},
+        body=lambda result: {}),
+    Command.STEP_OUT: DebugSpec(
+        child_cmd="step_out",
+        params=lambda args: {},
+        body=lambda result: {}),
     Command.SET_BREAKPOINTS: DebugSpec(
         child_cmd="set_breakpoints",
         params=lambda args: {"path": _fs_path((args.get("source") or {}).get("path")),
