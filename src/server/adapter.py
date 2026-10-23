@@ -126,7 +126,8 @@ class ForwardRequest(NamedTuple):
 #end class
 
 class TearDownChild(NamedTuple):
-    """收场拆除会话子进程：优雅窗→强杀（未接——砖4 disconnect 首撞落位）。"""
+    """收场拆除会话子进程：优雅窗→强杀；拆除尽力而为（落靶不问结局）。"""
+    req: ParsedRequest
 #end class
 
 Action = FulfillLaunch | ForwardRequest | TearDownChild
@@ -327,9 +328,16 @@ def step(pstate: ProtoState, req: ParsedRequest) -> StepResult:
             return StepResult(state=pstate,
                               action=ForwardRequest(req=req, cmd="config_done", params={}))
 
+        case (StateEnum.S2 | StateEnum.S3, Command.DISCONNECT):
+            # 收场：S2/S3 有肉身（不变量：履约 Done 才落 S2/S3），disconnect 先拆后别——
+            # 携动作自回环驻原态（frames 静默），双帧归 resolve（拆除后发，对齐参考
+            # "terminated 是拆除副产品"帧序）
+            return StepResult(state=pstate, action=TearDownChild(req=req))
+
         case (_, Command.DISCONNECT):
-            # 断路器：任何状态无守卫直达终态（偏离#5）；清 slot=丢弃整个状态；
-            # 帧序=响应先、terminated 后（2026-10-15 裁决 a：两门形状统一，对齐参考实测）
+            # 断路器：S0/S1（及 DEAD）无肉身，无可拆=纯转移直达终态（偏离#5）；
+            # 清 slot=丢弃整个状态；帧序=响应先、terminated 后（2026-10-15 裁决 a：
+            # 两门形状统一，对齐参考实测）
             return StepResult(state=pstate._replace(phase=StateEnum.DEAD, slot=None),
                               frames=(OkReply(request=req, payload={}),
                                       Event(event="terminated", body={})))
@@ -376,7 +384,7 @@ def _release_failed(pstate: ProtoState, req: ParsedRequest,
 
 
 def resolve(pstate: ProtoState, action: Action, outcome: Outcome) -> StepResult:
-    """完成在途转移：action×outcome 逐对落靶。占位动作在此即大声失败（未被机器声明过）。"""
+    """完成在途转移：action×outcome 逐对落靶；未声明的组合在此大声失败。"""
     match action, outcome:
         case (FulfillLaunch(req), Done(result)):
             pid = result.get("pid")
@@ -440,6 +448,13 @@ def resolve(pstate: ProtoState, action: Action, outcome: Outcome) -> StepResult:
             if req.command is Command.CONFIGURATION_DONE:
                 return _release_failed(pstate, req, code, message, detail)
             return StepResult(state=pstate, frames=(err_reply(req, code, message, detail),))
+        case (TearDownChild(req), _):
+            # 收场落靶：拆除尽力而为、会话照终（立场乙收场）——任何 outcome 同靶；
+            # 码/话术不因拆除结局变。DEAD+slot 清+双帧（响应先、terminated 后，
+            # 与纯转移断路器两门同形）
+            return StepResult(state=pstate._replace(phase=StateEnum.DEAD, slot=None),
+                              frames=(OkReply(request=req, payload={}),
+                                      Event(event="terminated", body={})))
         case _:
             raise AssertionError(f"unhandled transition: {action!r} / {outcome!r}")
     #end match

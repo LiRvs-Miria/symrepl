@@ -664,3 +664,25 @@ FIN/ABRUPT 不动 ③砖5 混沌三路（SIGKILL 在途/child 自毙 fatal/挂�
 - **小步序列**：①核+壳（test_core RED→绿+全网回归=收场链行为兼容证据）
   ②probe_chaos C1/C2/C3 ③档案（design-notes/进度档协议线收口/ledger）+终版
   sweep+待提交。
+
+**砖4+砖5 落地（2026-10-23，冷启动续冻结点；协议线收口）**：步1 核+壳转录零网炸一次过——
+核（adapter.py）：TearDownChild 落位定形携 req；step 断路器分行（`(S2|S3,disconnect)` 携动作
+自回环驻原态 frames 静默，双帧归 resolve=拆除后发；`(S0|S1)` 纯转移现状冻结，DEAD 落同行
+形状不变）；resolve 增 `(TearDownChild(req), _)` 单行——任何 outcome 同落靶 DEAD+slot 清+
+双帧（码/话术不问拆除结局）。壳（schedule.py）：child_close 返回归类 "graceful"|"killed"；
+run_effect 增 TearDownChild 臂（child=None 大声失败同 ForwardRequest 家法；child_close 归类
++rc 入日志 `child_teardown how=... rc=...`；回 Done({"how"})；conn.child 拆后清）；handle 零
+改动兑现（断路器形状红利：action 路 run_effect→resolve 既有）。**撞到即裁一笔**：conn.child
+拆后清（契约未列）——裁"肉身离册守 child 非空⇒在册不变量"，二次 disconnect 在 DEAD 终态
+不可达故无幂等冲突（幂等归 child_close 不变量③）。**码勘误一枚自收**（照 breakpoints 家法）：
+契约散文 C2"2002 携 upstream_timeout"笔误，UPSTREAM_TIMEOUT=2001，网按枚举真值钉。
+**网况**：test_core RED 3 FAIL→16/16 ALL PASS（零网炸，转录一次过）；probe_chaos 26/26
+首跑即绿（收编钉如契约诚实标注）——C1 快败实测 0.0s（Gone→2002，reader EOF 置 dead 后
+child_request 快败）、C2 烧窗实测 10.0s（TimedOut→2001，双侧钉：≥9.5s+码 2001）、C3 孤儿
+断言持有（bp 停 inferior 在场→disconnect→get_sign/lldb-server 零残留）+`child_teardown how=`
+日志判别显式拆除臂实跑（SBDebugger.Destroy 对活 inferior 处置的真线兑现）；对尸 child 拆除
+幂等=C1/C2 的 disconnect 链 FIN rc=0；17 网 rc=0×17+pytest 20/20 终版 sweep。**环境一笔**：
+真靶子易失已按 conftest 配方重建（基线 0/1/255 钉）；pytest 首跑瞬时 14 errors 复跑即绿
+（与假绿盯梢钉同类未坐实，记录在案）。**孤儿纪律兑现**：C1/C2 探针自清（pkill）不持断言、
+C3 持有——SIGKILL 会话员则 inferior/lldb-server 必成孤是场景定义，网不为脏环境误报。
+**协议线收场完毕**：砖4+砖5 关账，DAP 生命周期全程（launch→调试→收场→混沌）真线可观测。

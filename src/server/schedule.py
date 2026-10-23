@@ -18,9 +18,9 @@ from typing import assert_never
 from error import TransExitCode
 from framing import FrameBad, FrameBadReason, FrameEof, FrameOk, FrameOut, encode_frame, read_frame
 from adapter import (Action, Crashed, Done, ForwardRequest, FulfillLaunch, Gone,
-                     MaybeParsedRequest, Outcome, Rejected, SpawnFailed, TimedOut, ProtoState,
-                     Reply, StateEnum, StepResult, build_replies, parse_request, resolve, step,
-                     translate_child_event)
+                     MaybeParsedRequest, Outcome, Rejected, SpawnFailed, TearDownChild,
+                     TimedOut, ProtoState, Reply, StateEnum, StepResult, build_replies,
+                     parse_request, resolve, step, translate_child_event)
 from childproto import BadChildMsg, ChildEvent, ChildRequest, ChildResponse, parse_child_msg, request_msg
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "replay"))
@@ -211,8 +211,9 @@ async def child_ping(child, timeout: float = 10.0) -> dict:
 #end def
 
 
-async def child_close(child) -> None:
-    """收场：关 stdin 走 child 自杀路（exit0）→ 优雅窗 2s → 强杀。幂等（不变量③）。"""
+async def child_close(child) -> str:
+    """收场：关 stdin 走 child 自杀路（exit0）→ 优雅窗 2s → 强杀。幂等（不变量③）。
+    返回结局归类："graceful"=2s 优雅窗内自己走完；"killed"=窗口烧完强杀。"""
     ch = _CHANNELS.pop(child, None)
     if ch is not None and ch.reader_task is not None:
         ch.reader_task.cancel()
@@ -225,9 +226,11 @@ async def child_close(child) -> None:
     #end if
     try:
         await asyncio.wait_for(child.wait(), timeout=2.0)
+        return "graceful"
     except asyncio.TimeoutError:
         child.kill()
         await child.wait()
+        return "killed"
     #end try
 #end def
 
@@ -272,8 +275,8 @@ async def forward_event(conn: "ConnState", ev: ChildEvent) -> None:
 
 
 async def run_effect(conn: "ConnState", action: Action) -> Outcome:
-    """效果执行器：核声明、壳执行。成功只落册肉身与上交 result（内容不看），
-    失败收尸（幂等）并报物理事实。"""
+    """效果执行器：核声明、壳执行。FulfillLaunch 成=落册肉身，TearDownChild 成=离册；
+    成功上交 result（内容不看），失败收尸（幂等）并报物理事实。"""
     match action:
         case FulfillLaunch(req):
             child = None
@@ -312,6 +315,22 @@ async def run_effect(conn: "ConnState", action: Action) -> Outcome:
             conn.child = child                    # 会话肉身落册（砖3 事件源/砖4 拆除由此取）
             _channel_for(child).sink = functools.partial(forward_event, conn)   # 回流口随肉身就位
             return Done(result)
+        case TearDownChild():
+            child = conn.child
+            if child is None:                     # S2/S3 必然已履约；None=不变量洞，大声失败
+                raise AssertionError("TearDownChild with no session child")
+            #end if
+            try:
+                how = await child_close(child)
+            except Exception as e:                # 全捕获；分类归 _physical（落靶不问结局）
+                outcome = _physical(e)
+                log(f"effect_failed action={type(action).__name__} "
+                    f"outcome={type(outcome).__name__} detail={e!r}")
+                return outcome
+            #end try
+            conn.child = None                     # 肉身离册（拆除完成）
+            log(f"child_teardown how={how} rc={child.returncode}")
+            return Done({"how": how})
         case ForwardRequest(cmd=cmd, params=params):
             child = conn.child
             if child is None:                     # S2 必然已履约；None=不变量洞，大声失败
@@ -338,7 +357,7 @@ class ConnState:
     active_writer: asyncio.StreamWriter | None = None
     client_done: asyncio.Event = field(default_factory=asyncio.Event)
     exit_code: int = 0          # TransExitCode 的 int 值（FIN=0 / ABRUPT=2）
-    child: asyncio.subprocess.Process | None = None   # 会话肉身（run_effect 成功后落册；砖4 拆除取用）
+    child: asyncio.subprocess.Process | None = None   # 会话肉身（FulfillLaunch 落册；TearDownChild 拆除取用后清）
     # 壳搬运的两本账：协议状态 + 回包 seq
     pstate: ProtoState = ProtoState(phase=StateEnum.S0)
     seq: int = 1
