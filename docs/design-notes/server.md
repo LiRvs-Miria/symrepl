@@ -525,6 +525,45 @@ stale_reference，resume 家法世代语义真线兑现）；③全量 20 网 rc
 未入——结构性满足照跑）挂账。dap.md 命令清单/roadmap 押后注记/进度档/AGENTS
 20 网同步。
 
+## M3 路径缩小（KLEE-fork 子集圈定；2026-10-23 用户定案）
+
+> 正式记录：[ADR-0004](../../en/adr/0004-m3-path-narrowing.md)（M3）/
+> [ADR-0005](../../en/adr/0005-m4-path-consistency.md)（M4，en 为权威本）。
+> 本节=实施契约与对账记录，随转录滚动。
+
+**阶梯模型（用户）**：M1+M2 实际路径记录 → M3 LLVM IR 侧验证**缩小路径可能性**
+（获得更清晰的路径）→ M4 符号执行↔实际路径**完整校验**（.kquery 对账）。前层=
+后层必要条件，后层可选：只做 M1+M2 可以结束；做到 M3 路径变清晰；做到 M4 完整
+校验。**范围随之落定**：M3=方法1（.ll 静态符号性）+方法3（手工真值验收）；
+**方法2（.kquery）整体归 M4**。
+
+**三分类（圈定的本体）**：
+- **fork**：条件 ∈ 符号闭包——KLEE 在此分叉，.ktest=其中一支的采样
+- **噪声A**：站点所在函数不在 .ll 模块——KLEE 世界根本不存在的代码（回放
+  runtime 的文件读取/对象名比对；判据自然涌现：get_sign.ll 不含 intrinsics.c）
+- **噪声B**：条件不在符号闭包——具体分支（栈检查/循环边界）
+
+**定形**：
+- **launch 参数 `ir`**（optional，string=.ll 路径）——阶梯的运行时体现：未给=
+  现状零增帧（M1+M2 层），给了=trace 报告注记（M3 层）；坏 .ll→launch 期
+  Rejected（ktest refused 家法 fail-fast）
+- **注记层**：trace 报告节点增字段 kind=`fork|runtime` + detail 携判据
+  （symbolic-branch / function-not-in-module / concrete-condition）——A/B 在
+  detail 里区分，v1 kind 二值；注记=派生层，零处理红线不破；**走向（taken/
+  not-taken）M3 v1 不落**（站序隐含），M4 需要时即裁
+- **判定机制**：.ll 轻量符号数据流——make_symbolic 调用点→内存标记→load/
+  icmp 传播→直接调用实参→形参绑定→br 条件 ∈ 闭包？；新纯件（replay/ 册，
+  名暂 pathmark，可议）；.ll=clang -emit-llvm 链路外产物，服务零 KLEE 依赖
+- **DWARF 桥接**：.ll !DILocation(line) ↔ native actual line/function **行级
+  join**（两次编译的既定边界，不做指令级）
+- **验收真值（手工先行，get_sign 三 ktest）**：
+  - test1（a=0，exit 0）：fork=[L11]；L13 不出现（早退）
+  - test2（a=0x01010101，exit 1）：fork=[L11, L13]（双 not-taken）
+  - test3（a=0x80000000，exit 255）：fork=[L11, L13]（L13 taken）
+  - 噪声=intrinsics.c 全部（A 类）；入口停非决策
+- **M3/M4 分工**：M3 答"这站是不是符号分支"（程序性质，静态）；M4 答
+  "KLEE 在这条路径建立了哪些约束"（执行事实，.kquery）——将来两网互证
+
 ## branchTrace 预扫描引导回放+报告（2026-10-21 定案，M2 收尾件）
 
 **定案链（用户，2026-10-21 三段演进）**：纯被动汇总（AI 提，废——用户：
