@@ -686,3 +686,92 @@ child_request 快败）、C2 烧窗实测 10.0s（TimedOut→2001，双侧钉：
 （与假绿盯梢钉同类未坐实，记录在案）。**孤儿纪律兑现**：C1/C2 探针自清（pkill）不持断言、
 C3 持有——SIGKILL 会话员则 inferior/lldb-server 必成孤是场景定义，网不为脏环境误报。
 **协议线收场完毕**：砖4+砖5 关账，DAP 生命周期全程（launch→调试→收场→混沌）真线可观测。
+
+## stdio/VS Code 接线（2026-10-23，lldbDir 参数化——decision 14 保持，E4 argv 裁决修订）
+
+**先验（用户三裁，2026-10-23）**：①方向=stdio/VS Code 补强先于 M3（全链路真客户端段收口，
+分支 stdio-vscode）；②注入路径=**A 案**——lldbDir 经 DAP launch 请求参数携带，argv
+`--lldb-dir` 降为可选（boot 值作缺省）；扩展保持零码（decision 14 不动），修订的是 E4
+"argv required" 的字面——零 PATH/env 猜测原则不破（两处皆缺=launch 期干净错）；
+③冲突本质=boot 索取时机 vs F5 直启 argv 恒空（官方文档实证：声明式 adapter 无 argv 通道，
+launch 属性只经 DAP launch 请求到达；argv 级定制唯一正路=DescriptorFactory 扩展代码）。
+
+**AI 攻击记录（四枚，自收落约）**：
+1. **码语义**：缺失双处（boot 无 argv+launch 无 lldbDir）在壳侧拦截，Outcome 不为此加员
+   ——照 **ktest refused 家法**（run_effect 返回 Rejected→2002 "session refused launch"
+   +detail 说真相）；lldbDir 形状坏（present⇒非空 str）归核 validate_launch（1001，
+   同 ktest/target 家族）。
+2. **dap_adapter 缺 --stdio**：注释意图 stdio、代码未传——VS Code spawn 形态必须 stdio，
+   照修（`--stdio` 硬编码进启动器；TCP/debugServer 用户直接起 schedule.py，不经此脚本）。
+3. **package.json required-ness**：lldbDir 声明 optional（schema required 会误伤
+   debugServer 用户——那条路 lldb-dir 由人手动传，运行时壳侧强制兜底）。
+4. **boot 缺省与 launch 覆盖的优先级**：`launch args lldbDir or conn.lldb_dir`（launch
+   优先）；17 存量网全走 argv 路不携带 launch lldbDir=兼容回归证据。
+
+**定形**：
+- **核（adapter.py）**：validate_launch 增 lldbDir 形状行——present 且非（非空 str）→
+  "launch 'lldbDir' must be a non-empty path string"（1001）；缺席不拦（boot 缺省可补）。
+- **壳（schedule.py）**：argparse --lldb-dir 降 optional（default ""）；run_effect
+  FulfillLaunch 臂解析 `lldb_dir = req.arguments.get("lldbDir") or conn.lldb_dir`，
+  两处皆缺 → Rejected(detail="no lldb_dir: set 'lldbDir' in launch arguments or pass
+  --lldb-dir at boot")；spawn_child 用解析值。ConnState.lldb_dir 语义=boot 缺省。
+- **vscode 面**：package.json launch 属性增 lldbDir（optional，string）；dap_adapter
+  改 `exec ... schedule.py --stdio "$@"`。
+- **网（probes/probe_lldbdir.py，端口 5699，真饵）**：S1 TCP boot 无 dir→alive→launch
+  携 lldbDir→全链→threads→disconnect exit0；S2 stdio boot 无 dir→alive→initialize
+  caps→stdin EOF exit0；S3 单会话四连发（无 lldbDir→2002 携 no lldb_dir / lldbDir=""
+  →1001 / lldbDir=不存在→2002 携 unavailable / lldbDir=真 dir→全链 exit0）。
+- **小步序列**：①核+壳转录（probe_lldbdir RED→绿+17 网回归=argv 兼容证据）②vscode 面
+  （声明/脚本，描述性改动）③真客户端联调（人在环：F5 直启+debugServer 两形态；
+  **terminate 广告钉**撞到即裁）④档案（design-notes/进度档/dap.md en+zh/roadmap en+zh
+  同步+AGENTS.md 网数陈旧修正）+sweep+待提交。
+
+**RED 基线（2026-10-23）**：probe_lldbdir 11 FAIL/0 PASS 全红——三场景 boot 即死
+（argparse exit 2），连带全红（模块缺位形）。勘误一枚自收：契约初稿预测"12/12"，
+S3 末两查落笔时合并，实为 11——预测数与查数对齐归落笔核，非网松。
+
+### 真客户端联调撞钉（2026-10-23，trace 实证两轮）
+
+**第一层：S2 配置期断点被状态门拒**。VS Code 标准时序=setBreakpoints 在 configDone
+之前（initialized 后），转移表 S2 无调试命令行→兜底状态门 1003 →断点从未注册。
+**用户裁（结构性修法）**：调试器层/适配器层劈分——调试器层命令=自回环转发子进程，
+永不触发适配器层状态迁移；状态迁移权只在适配器层命令（initialize/launch/configDone/
+disconnect）。落地=整层路由行 (S3,_) 加宽 (S2|S3,_)（resolve 的 ForwardRequest 落靶
+按命令分业务，无相位假设，零改动兑现）。
+
+**第二层：setBreakpoints 线形状两钉**（trace 实证：Remote-SSH 客户端 source.path=
+`vscode-remote://ssh-remote%2B<host>/home/...` URI 形状）：URI 原样进 LLDB→
+BreakpointCreateByLocation 解析不到→pending（零 location）→IsValid() True→verified
+谎报 True→VS Code 实心红点永不命中，continue 直通 exit。
+- **钉 A（用户裁）**：父面 DEBUG_SPECS params_fn 做 URI 归一——带 scheme 取 URL
+  path 分量（vscode-remote://authority/home/... → /home/...；file:// 同款），纯路径
+  原样过。客户端线形状归父面，child 不知 VS Code URI。
+- **钉 B（用户裁）**：backend verified=IsValid() 且 GetNumLocations()>0——pending
+  如实报 False（未验证=空心点，说真话）；断点 id 照记册（全量替换清理不受影响）。
+- RED（probe_breakpoints 新场景 realclient_shapes）：V5 URI 路径→continue 停 L20 红、
+  V6 不存在路径→verified False 红；修复后两钉齐绿+全量回归。
+
+### 真客户端第三层钉（2026-10-23，用户两裁）
+
+**会话侧性（extensionKind）**：trace 实证 VS Code 把会话跑在 UI 侧——断点以
+`vscode-remote://` URI 发来（workspace 侧会话发普通路径）+ 栈 path 远端路径 UI 打不开
+显示"未知源"（双向资源映射全拧；连接通是 VS Code 自动端口转发兜住）。步2 的
+`["ui","workspace"]` ui 优先是主嫌疑。**用户裁改 `["workspace"]`**（会话归远端，
+VS Code 内建路径双向转换生效）。钉 A 的 URI 归一留任=防御纵深（file:// 同款）。
+
+**terminate 广告钉兑现**：UI 停止按钮首发 terminate（capability 广告未实现）→
+not implemented 报错；二次 VS Code 降级 disconnect → 正确收场。**用户裁实现
+terminate**：收场语义照 disconnect 两门同形（(S2|S3)=TearDownChild 拆除臂，
+(_,)=断路器纯转移 DEAD+resp+terminated）；response 无 body；子面零改动（terminate
+全程父面核处理，不达 child）。RED=probe_terminate（5701）T1 S0 断路器/T2 S3 带
+inferior 在场拆除。
+
+### 第四层钉：stackFrame.source 包裹（2026-10-23，真客户端暴露形状缺位）
+
+会话侧归远端后源码仍"未知源"：child 帧 dict 原样透传 stackFrames——`path` 裸挂
+帧级；**DAP StackFrame 规范要求 `source: {name, path}` 包裹**，VS Code 只认
+`frame.source.path`，帧级裸 path 被无视。**用户裁钉 C（线格式映射归父面）**：
+STACK_TRACE body_fn 补映射（SCOPES 同位先例）——path 非空包 `source{name=basename,
+path}`，空路径（_start 入口帧）省略 source。**网钉勘误**：probe_breakpoints 三查+
+probe_stacktrace 形状查当时与实现同错（帧级 path），最小客户端跟错形状跑绿——形状
+钉两网同错=盲区实证，真客户端是第四张网（协议标准形状网）。

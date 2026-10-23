@@ -9,14 +9,20 @@ connection.
 
     python3 src/server/schedule.py --stdio            # stdio — one client, one session
     python3 src/server/schedule.py --port 47113 --lldb-dir /usr/lib/llvm-22/bin
-    # (see `python3 src/server/schedule.py --help`; --lldb-dir = toolchain dir)
+    # (see `python3 src/server/schedule.py --help`; --lldb-dir = toolchain
+    #  dir, optional at boot — the `lldbDir` launch argument overrides it;
+    #  missing in both places = clean launch-time refusal)
 
 Lifecycle: `initialize` → `launch` (response withheld) → `initialized`
 event → `setBreakpoints`/… → `configurationDone` → launch response →
-`stopped`/`exited`/`terminated` events.  Capabilities are frozen
-(ADR-0003 decision 4): `supportsConfigurationDoneRequest` and
-`supportsTerminateRequest`; `evaluate`/`completions` are deferred past
-M2.
+`stopped`/`exited`/`terminated` events.  Debugger-layer commands
+(`threads`/`stackTrace`/`scopes`/`variables`/`continue`/
+`setBreakpoints`) self-loop: they forward to the child without moving
+the adapter state machine — breakpoints may be set in the
+configuration phase (standard client timing) and after any stop.
+Capabilities are frozen (ADR-0003 decision 4):
+`supportsConfigurationDoneRequest` and `supportsTerminateRequest`;
+`evaluate`/`completions` are deferred past M2.
 
 ## VS Code
 
@@ -31,6 +37,7 @@ Install the zero-code extension in [`vscode/`](../../vscode)
   "name": "replay get_sign",
   "ktest": "third_party/klee/ktest/get_sign_test000002.ktest",
   "target": "${workspaceFolder}/get_sign",
+  "lldbDir": "/usr/lib/llvm-22/bin",
   "stopOnEntry": true,
   "scope": "get_sign"
 }
@@ -38,9 +45,8 @@ Install the zero-code extension in [`vscode/`](../../vscode)
 
 For development against an already-running server use
 `"debugServer": 47113` in place of `launch` — no extension needed
-(that is how the test suite and
-[`scripts/acceptance_dap.py`](../../scripts/acceptance_dap.py) drive
-the server).
+(that is how the probe suites in [`probes/`](../../probes) drive the
+server); start the server manually with `--lldb-dir` in that form.
 
 ## Launch arguments (frozen, ADR-0003 decision 10)
 
@@ -48,6 +54,8 @@ the server).
 | -------------- | ---------------- | --------- | ------------------------------------------------ |
 | `ktest`        | string, required | —         | the `.ktest` to replay (validated parent-side)   |
 | `target`       | string, required | —         | debuggee binary (linked with `-lkleeRuntest`)    |
+| `lldbDir`      | string           | boot argv | toolchain dir containing `lldb`+`lldb-server`;   |
+|                |                  |           | overrides `--lldb-dir` given at boot             |
 | `stopOnEntry`  | boolean          | `false`   | stop at the entry point                          |
 | `stopOnBranch` | boolean          | `false`   | stop at every traced branch (else M1 parity)     |
 | `scope`        | string           | `"module"`| tracing scope: `"module"` or function names      |
@@ -57,8 +65,8 @@ the server).
 
 Tracing is always on within `scope`: traced sites record-and-continue
 (M1 parity), and the ordered report — sites, hits, outcomes, per-site
-summary — is pushed to the Debug Console (`output`) at session end and
-available on demand via the custom request `replay.branchTrace`.
+summary — is pushed to the Debug Console (`output`) at session end
+(passive: there is no request face for it).
 `"stopOnBranch": true` instead stops at every site
 (`stopped`, reason `breakpoint`), exposing live variables.
 

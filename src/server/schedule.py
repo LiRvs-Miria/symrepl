@@ -281,6 +281,15 @@ async def run_effect(conn: "ConnState", action: Action) -> Outcome:
         case FulfillLaunch(req):
             child = None
             try:
+                # lldb_dir 解析：launch 参数优先，boot argv 作缺省；两处皆缺=配置
+                # 不完整，照 ktest refused 家法 Rejected（detail 说真相）
+                lldb_dir = req.arguments.get("lldbDir") or conn.lldb_dir
+                if not lldb_dir:
+                    log(f"effect_failed action=FulfillLaunch outcome=Rejected "
+                        f"detail=no lldb_dir")
+                    return Rejected(detail="no lldb_dir: set 'lldbDir' in launch "
+                                            "arguments or pass --lldb-dir at boot")
+                #end if
                 # launch 门禁（原 M2-b1 承诺"ktest 由父进程校验"）：E1 解析器
                 # 校验+解析一次，对象结构化下发——backend 不再自读文件。
                 parsed = ktest_load(req.arguments["ktest"])
@@ -294,7 +303,7 @@ async def run_effect(conn: "ConnState", action: Action) -> Outcome:
                                for o in parsed.objects]
                 child = await spawn_child([sys.executable, SESSION_SCRIPT,
                                            "--backend", conn.backend,
-                                           "--lldb-dir", conn.lldb_dir])
+                                           "--lldb-dir", lldb_dir])
                 await child_ping(child)
                 launch_params = {"ktest": req.arguments["ktest"],
                                  "target": req.arguments["target"],
@@ -361,7 +370,7 @@ class ConnState:
     # 壳搬运的两本账：协议状态 + 回包 seq
     pstate: ProtoState = ProtoState(phase=StateEnum.S0)
     seq: int = 1
-    # 后端插拔参数（main 按 argv 填真值；spawn 时下传子进程）
+    # 后端插拔参数（main 按 argv 填真值；lldb_dir=boot 缺省，launch 参数 lldbDir 可覆盖）
     backend: str = "lldb"
     lldb_dir: str = ""
 #end class
@@ -516,8 +525,9 @@ if __name__ == "__main__":
                         help="DAP over stdin/stdout（忽略 port；单会话）")
     parser.add_argument("--backend", default="lldb",
                         help="debugger backend name（插拔册键）")
-    parser.add_argument("--lldb-dir", required=True, metavar="DIR",
-                        help="toolchain dir containing lldb and lldb-server")
+    parser.add_argument("--lldb-dir", default="", metavar="DIR",
+                        help="toolchain dir containing lldb and lldb-server "
+                             "(boot default; 'lldbDir' launch argument overrides)")
     _a = parser.parse_args()
     if _a.stdio:
         sys.exit(asyncio.run(amain_stdio(backend=_a.backend,

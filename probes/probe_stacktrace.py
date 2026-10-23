@@ -119,10 +119,13 @@ def stacktrace_chain():
         shape_ok = (isinstance(frames, list) and len(frames) >= 1
                     and all(isinstance(f.get("id"), int) and isinstance(f.get("name"), str)
                             and isinstance(f.get("line"), int) and isinstance(f.get("column"), int)
-                            and isinstance(f.get("path"), str)
+                            and (f.get("source") is None
+                                 or (isinstance(f["source"], dict)
+                                     and isinstance(f["source"].get("name"), str)
+                                     and isinstance(f["source"].get("path"), str)))
                             for f in frames)
                     and isinstance(body.get("totalFrames"), int))
-        check(name + ": S3 stackTrace 成臂（stackFrames[].{id,name,line,column,path}+totalFrames）",
+        check(name + ": S3 stackTrace 成臂（DAP StackFrame：source{name,path} 包裹+totalFrames）",
               r is not None and r.get("success") is True and shape_ok)
 
         # 负路：线程不存在 → 2002（子面 no_thread 经 Rejected 败臂）

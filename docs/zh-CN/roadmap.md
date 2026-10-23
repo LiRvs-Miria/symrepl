@@ -96,6 +96,20 @@ mock-debug 的 DAP 子集；分支追踪经 `stopOnBranch` 与自定义请求
   经 `"debugServer"` 跑通；混沌测试以 `terminated` 干净失败，绝不
   挂死。
 
+### stdio/VS Code 接线（2026-10-23，cleanroom，已完成）
+
+- `--lldb-dir` boot 降可选；launch 参数 `lldbDir` 携带工具链目录。扩
+  展保持零代码；`extensionKind: ["workspace"]` 使 Remote-SSH 下调试
+  会话归 workspace 侧（UI 侧会话双向资源映射全拧）。
+- 调试器层命令（`threads`/`stackTrace`/`scopes`/`variables`/
+  `continue`/`setBreakpoints`）自回环转发、不迁移适配器状态——断点
+  可在配置期（标准客户端时序）设置。
+- `terminate` 已实现（与 `disconnect` 两门同形）；栈帧携 DAP
+  `source{name, path}`。
+- 真客户端验收（VS Code over Remote-SSH）：断点停 L20、源码显示、
+  停止按钮干净收场。裁决与 trace 证据见
+  `docs/design-notes/server.md`。
+
 已知风险（2026-10-05 规划定稿）：
 
 - **stdio 卫生**是最锋利的边界：任何库或 LLDB 内部对 fd 1 的杂散写入
