@@ -1,8 +1,8 @@
-# cleanroom 转正推进状态（立项 2026-10-16：local-cleanroom 替代 src/symrepl/dap/）
+# 项目进度快照（2026-10-16 立项，2026-10-22 转正定形；cleanroom 名随转正退役 2026-10-23）
 
-> 本文件是会话进度快照（**冻结 2026-10-22**），冷启动从此取活。
+> 本文件是会话进度快照（**冻结 2026-10-23**），冷启动从此取活。
 > 配套：[`docs/design-notes/server.md`](docs/design-notes/server.md)（设计档案，2026-10-22 迁 docs/design-notes/，含契约/裁决/命名/通道选型/网炸史全记录）、[`../research-survey/plan/ai-independence.md`](../research-survey/plan/ai-independence.md)（承重协议，§2.6 决策节律）、[`../research-survey/plan/ai-ledger.md`](../research-survey/plan/ai-ledger.md)（对账账本，追加式）。
-> 转正注记（2026-10-22）：树已由 `local-cleanroom/` 更名 `src/`（本文件名留用）；M1 CLI 回放链路同日退役（取代裁决走到底，git 历史存档）。
+> 转正注记（2026-10-22）：树已由 `local-cleanroom/` 更名 `src/`；本文件更名 `progress.md`（2026-10-23，cleanroom 时期名退役）。M1 CLI 回放链路同日退役（取代裁决走到底，git 历史存档）。
 > 前史：phase1（2026-10-12 关账）/ phase2（2026-10-15 收官）的 local-test* 档案已删除（2026-10-16），考古走 git 历史。
 
 ## 总纲（已定裁决，勿重议）
@@ -52,6 +52,11 @@
 - [x] roadmap en/zh 编辑性修订（✅ 2026-10-21 已随 7ba89f2：branchTrace 重定形/stepping 押后非砍死/一致性校验归 M4）
 - [x] ~~归一一步到位（原 A 案：五件包化/replay-algebra 子包/13 网搬家/pytest 41 项重切）~~（✅ 2026-10-22 以 **B 案**关账：cleanroom 原地转正+src dap 退役+framing 20 项补位+cli 子进程派发——见已关账表；A 案细则整体作废）
 
+### KLEE 语义桥（M3/M4，2026-10-23 起为代码块主线；排期裁决见账本）
+- [ ] M3 KLEE-fork 约束子集映射（IR/DWARF）——起步链路已铺：get_sign 3 ktest（基线 0/1/255）+branchTrace actual 站点集+phase1 账本知识（P5 欠账：trace=动态超集，kTest_fromFile 等运行时读文件分支是与路径条件无关的噪声，KLEE-fork 约束子集圈定被显式推迟到此）。**第一步**=KLEE 侧导出路径约束（.kquery/公式）对照 actual 圈定 fork 决策点 vs 运行时噪声；起步前置=KLEE 产物在手（现 fixtures 只有 .ktest，需 KLEE 跑一次或手工导出 get_sign 路径约束起步，机器化随砖推进）；ADR-0001 边界=只消费 KLEE 公开产物（.kquery/.ll），本体不入回放链路
+- [ ] M4 路径级一致性校验工具（薄桥定位，方案 A）——依赖 M3 产出；E2 match_path/equal 首消费点（代数已留册）；KLEE 约束经公开 .kquery 消费；**SMT 依赖撞到即裁**：破薄桥/零依赖定位则按 ptrfuzz 模型外置为独立库依赖项目（roadmap 预案）
+- M0 并行注记：DAPSEC M0 文献普查=工作日碎片时间并行（纯检索不入代码，止损检测+§2 素材）；M1 测量工程等 M3/M4 落地后启动（排期裁决：先实践筑底再写测量论文——用户自评"没足够的实践论文没底"）
+
 ### 引擎线（对账网随件裁：E1 oracle 对账 / E2 起取代无 oracle）
 - [x] ~~E4 会话编排续刀~~（✅ 2026-10-22 关账：编演建模收敛以代数化兑现——session_lifecycle 纯核册+壳瘦身+test_session_lifecycle 25 查；trace_report 输出事件流早已随 branchTrace 落地——见已关账表；**引擎线清零，交替制终结**）
 - [x] stepping（✅ 2026-10-23 关账：原 M2-d 兑现，2026-10-21 押后钉解除——用户两钉**同步阻塞模型**+**三件起步**（next/stepIn/stepOut；pause 维持押后需长跑靶子）。核（ExecTrigger 三成员+守卫三行={STOPPED}+转移三行照 CONTINUE 形 RESUME_INFERIOR→RUNNING 世代+1）+backend（_step_resume 公共体同步阻塞+stop_reason_label 增 PlanComplete→"step"）+child 三门牌（next/step_in/step_out）+父面三命令（threadId 忽略照 continue 家法，body 无）；**网炸一枚**：SB 绑定返回面不统一——StepOver 系成功返 None 非 SBError，err.Fail() 炸响应面而步进本体已执行（同网响应面/行为面各逮一格）→归一 None=无错形态；世代语义真线兑现（T6：next 后旧 frameId→2002 stale_reference，resume 家法）；真饵链=存痕复活 bp L20→next→L21→stepIn→get_sign L11→stepOut→main L21；证据=probe_step 5703 RED 8 FAIL→ALL PASS+pytest 20/20+**20 网 rc=0** sweep；撞到即裁：Protocol 声明面欠账挂账（continue_ 亦未入册，结构性满足照跑））
@@ -61,7 +66,7 @@
 - ~~**stepping 押后钉**~~（✅ 2026-10-23 兑现关账：next/stepIn/stepOut 同步阻塞三件——见引擎线关账行；**pause 维持押后**：需长跑靶子，get_sign 秒退无 running 窗口）；**pause 押后钉**（terminate 已兑现 2026-10-23，pause 仍不实现，需求实证再议）——链路知识存 server/design-notes step 族节；**Protocol 声明面欠账**（DebugBackend 缺 continue_/wait_state/exit_code/step×3——结构性满足照跑，补账挂账）
 
 - ~~**stdio/VS Code 押后钉**~~（✅ 2026-10-23 兑现：lldbDir 参数化+真客户端联调全链贯通——见待办关账行；`--stdio`/dap_adapter/lldbDir/extensionKind 全部就位）
-- **DAP 面入库钉**：ptrfuzz 或他者要 import 树时再包化（pyproject 现为 dev-only，无可安装包；M1 已退役，库面届时从 cleanroom 定形）
+- **DAP 面入库钉**：ptrfuzz 或他者要 import 树时再包化（pyproject 现为 dev-only，无可安装包；M1 已退役，库面届时从现树定形）
 - **flaky 盯梢钉**（累计五例：breakpoints 网 2026-10-21 两例+2026-10-22 一例，continue 网 2026-10-23 一例，trace 网 2026-10-23 一例（RST 症状 `session_end reason=reset`）——深循环偶发单跑复绿，取证已入网，根因未坐实）；**假绿盯梢钉**（2026-10-22）：probe_ktest 转正首轮回跑 rc=0 但 ROOT 层级差一（ROOT/"replay" 应为 parent.parent/"replay"）——同路径现在确定性红，当时假绿机制未坐实（怀疑与 git mv 时序的中间态有关）；已修死+终版全绿，若再现按 flaky 取证入网家法办
 - **类型检查器**：代数化后"忘拆包/漏成员"类错该由检查器兜（E3 网炸实证），接入待裁
 - **壳侧直测网**：漏导入两连（Crashed/ForwardRequest，py_compile 不设防 NameError）

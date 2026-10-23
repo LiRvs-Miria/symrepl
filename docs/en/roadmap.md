@@ -114,7 +114,7 @@ manifest skeleton may be pulled ahead:
   `"debugServer"`; chaos tests fail cleanly with `terminated`, never a
   hang.
 
-### stdio/VS Code wiring (2026-10-23, cleanroom, done)
+### stdio/VS Code wiring (2026-10-23, done)
 
 - `--lldb-dir` optional at boot; the `lldbDir` launch argument carries
   the toolchain dir. The extension stays zero-code;
@@ -207,7 +207,7 @@ consumer needs to import the tree.
   break the "thin bridge / zero-dependency" positioning, it becomes a
   separate library-dependency project following the ptrfuzz model
   (to be decided then). The comparison algebra pre-laid inside the
-  replayer (`local-cleanroom/replay/branches.py` `equal`/`match_path`)
+  replayer (`src/replay/branches.py` `equal`/`match_path`)
   is consumed by this layer and is not wired into the replay path.
 
 ## Ecosystem

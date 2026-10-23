@@ -1,6 +1,6 @@
-"""Unit tests for the Content-Length frame codec (cleanroom framing).
+"""Unit tests for the Content-Length frame codec (DAP framing).
 
-The framing module lives in the cleanroom tree (``local-cleanroom/server``,
+The framing module lives in the product tree (``src/server``,
 the promoted DAP face); these tests import it directly off that directory.
 Value-ADT API: ``read_frame`` returns ``FrameOk``/``FrameEof``/``FrameBad``
 instead of raising; malformed frames are fatal at the session layer

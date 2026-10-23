@@ -135,7 +135,7 @@ if __name__ == "__main__":
             #end try
         #end for
     else:
-        print(f"cleanroom branches 模块缺位（RED 全红基线）：{_IMPORT_DETAIL}")
+        print(f"branches 模块缺位（RED 全红基线）：{_IMPORT_DETAIL}")
         for name, _ in CHECKS:
             check(name, False)
         #end for

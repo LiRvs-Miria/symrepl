@@ -1,6 +1,6 @@
 #!/bin/sh
 # VS Code zero-code adapter launcher (ADR-0003 decision 14, Linux-first):
-# exec the symrepl DAP server (cleanroom tree) on stdio — VS Code spawns
+# exec the symrepl DAP server (src/server/schedule.py) on stdio — VS Code spawns
 # this script as the adapter and speaks DAP over its stdin/stdout.
 # A "debugServer" launch.json entry connects to an already-running server
 # instead — that is how development and the nets drive it (start

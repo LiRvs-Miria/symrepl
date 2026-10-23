@@ -1,4 +1,4 @@
-# src/ — 产品树（cleanroom 转正，2026-10-22）
+# src/ — 产品树（2026-10-22 转正定形）
 
 - `server/` — DAP 面七件（schedule/adapter/session/framing/childproto/error/lldb_backend），
   按 checkout 脚本运行（`python3 src/server/schedule.py --help`）；

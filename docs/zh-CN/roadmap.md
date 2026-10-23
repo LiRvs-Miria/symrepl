@@ -96,7 +96,7 @@ mock-debug 的 DAP 子集；分支追踪经 `stopOnBranch` 与自定义请求
   经 `"debugServer"` 跑通；混沌测试以 `terminated` 干净失败，绝不
   挂死。
 
-### stdio/VS Code 接线（2026-10-23，cleanroom，已完成）
+### stdio/VS Code 接线（2026-10-23，已完成）
 
 - `--lldb-dir` boot 降可选；launch 参数 `lldbDir` 携带工具链目录。扩
   展保持零代码；`extensionKind: ["workspace"]` 使 Remote-SSH 下调试
@@ -162,7 +162,7 @@ cleanroom 重写即产品树，原地转正：`src/` 现在承载 DAP 面（`ser
 - **路径一致性校验**（2026-10-21 扩员，用户裁）：消费 branchTrace 报告做
   路径建模、求解与一致性校验——轨迹分析的一部分。KLEE 路径约束经公开
   `.kquery` 消费；SMT 求解若破"薄桥/零依赖"定位，按 ptrfuzz 模式独立成库
-  依赖项目（届时再裁）。回放器内预铺的比对代数（`local-cleanroom/replay/
+  依赖项目（届时再裁）。回放器内预铺的比对代数（`src/replay/
   branches.py` 的 `equal`/`match_path`）由此层消费，不接进回放链路。
 
 ## 生态

@@ -247,7 +247,7 @@ class Session:
                 raise SessionError(SessionErrCode.BAD_TARGET,
                                    f"lldb could not load target: {target}")
             #end if
-            self.listener = self.lldb.SBListener("cleanroom-session")
+            self.listener = self.lldb.SBListener("symrepl-session")
             self.process = None
             self.target_path = target
             self._exec = ExecState()            # 编排态（相位+世代票据）：核所有，壳只提交

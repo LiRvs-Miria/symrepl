@@ -65,7 +65,7 @@ RED 预期=模块缺位全红、改形处精准红（清单即需求文本）。
 > M1 回放核（`src/symrepl/replay/`，ktest/branches/trace/driver 共 1007 行）的 cleanroom
 > 重写。性质=承重件（安全×程序分析交叠域核心因果链）。**零代码继承**：M1=规格源+行为
 > oracle，代码不入境（只进网的 oracle 臂）。本册与 [`server.md`](server.md)
-> 平行；总进度=[`../../local-cleanroom-progress.md`](../../local-cleanroom-progress.md)。
+> 平行；总进度=[`../../progress.md`](../../progress.md)。
 
 ## E1 ktest 解析重写（2026-10-20，纯读；契约）
 
