@@ -40,7 +40,6 @@ Install the zero-code extension in [`vscode/`](../../vscode)
   "ktest": "third_party/klee/ktest/get_sign_test000002.ktest",
   "target": "${workspaceFolder}/get_sign",
   "lldbDir": "/usr/lib/llvm-22/bin",
-  "stopOnEntry": true,
   "scope": "get_sign"
 }
 ```
@@ -50,32 +49,50 @@ For development against an already-running server use
 (that is how the probe suites in [`probes/`](../../probes) drive the
 server); start the server manually with `--lldb-dir` in that form.
 
-## Launch arguments (frozen, ADR-0003 decision 10)
+## Launch arguments
+
+Core (`ktest`/`target`) frozen per ADR-0003 decision 10; extensions
+(`lldbDir`, `scope`, `ir`) ride the same validation family, each landed
+with its own probe net.
 
 | argument       | type             | default   | meaning                                          |
 | -------------- | ---------------- | --------- | ------------------------------------------------ |
-| `ktest`        | string, required | —         | the `.ktest` to replay (validated parent-side)   |
-| `target`       | string, required | —         | debuggee binary (linked with `-lkleeRuntest`)    |
+| `ktest`        | string, required | —         | the `.ktest` to replay (parsed parent-side,      |
+|                |                  |           | structured to the session child)                 |
+| `target`       | string, required | —         | debuggee binary (linked with the kleeRuntest     |
+|                |                  |           | runtime)                                         |
 | `lldbDir`      | string           | boot argv | toolchain dir containing `lldb`+`lldb-server`;   |
 |                |                  |           | overrides `--lldb-dir` given at boot             |
-| `stopOnEntry`  | boolean          | `false`   | stop at the entry point                          |
-| `stopOnBranch` | boolean          | `false`   | stop at every traced branch (else M1 parity)     |
-| `scope`        | string           | `"module"`| tracing scope: `"module"` or function names      |
-| `timeout`      | number           | off       | seconds before the run is aborted (decision 9)   |
+| `scope`        | string           | —         | branch-trace instrumentation scope: `"module"`   |
+|                |                  |           | or comma-separated function names; absent = no   |
+|                |                  |           | instrumentation, no report                       |
+| `ir`           | string           | —         | path to the target's `.ll` (`clang -O0 -g -S     |
+|                |                  |           | -emit-llvm`, M3); present = report nodes carry   |
+|                |                  |           | fork/runtime annotations; unparsable = launch    |
+|                |                  |           | rejected (fail-fast, before spawn)               |
 
 ## Branch tracing
 
-Tracing is always on within `scope`: traced sites record-and-continue
-(M1 parity), and the ordered report — sites, hits, outcomes, per-site
-summary — is pushed to the Debug Console (`output`) at session end
-(passive: there is no request face for it).
-`"stopOnBranch": true` instead stops at every site
-(`stopped`, reason `breakpoint`), exposing live variables.
+Tracing is opt-in via `scope`: at `configurationDone` the session
+auto-instruments every conditional site in scope (breakpoints by load
+address); each hit emits `stopped` (reason `breakpoint`) and the
+ordered report — pc, function, `file:line:column`, mnemonic, call
+stack, registered symbol values with ktest byte annotations — is
+pushed as an `output` event when the session ends (passive: there is
+no request face for it). The entry stop is not a site.
+
+With `ir` (M3, [ADR-0004](adr/0004-m3-path-narrowing.md)): report
+nodes additionally carry `kind: "fork" | "runtime"` plus `detail`
+(`symbolic-branch` / `function-not-in-module` / `concrete-condition`)
+— the static fork subset computed from the `.ll` text. Without `ir`
+no annotation fields are added (the M1+M2 shape is unchanged).
 
 ## Limitations (recorded honestly)
 
 - single session per server process; multi-session deferred
-- `evaluate`/`completions` (the Debug Console REPL) deferred past M2
-- the last traced hit's outcome is unobservable (M1 blind spot; M3)
-- tracing is a superset of the recorded path decisions — mapping the
-  KLEE-fork constraining subset needs IR/DWARF (M3)
+- `evaluate`/`completions` (the Debug Console REPL) deferred per ADR
+- the last traced hit's taken/not-taken direction stays unobserved
+  (site order implies it; M3 non-goal per ADR-0004 decision 5)
+- tracing without `ir` is a superset of the path decisions; the
+  fork/runtime annotation narrows it statically (M3); dynamic
+  input-dependence (differential replay) is M4

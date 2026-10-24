@@ -46,7 +46,6 @@ stdio 或单条 TCP 连接。
   "ktest": "third_party/klee/ktest/get_sign_test000002.ktest",
   "target": "${workspaceFolder}/get_sign",
   "lldbDir": "/usr/lib/llvm-22/bin",
-  "stopOnEntry": true,
   "scope": "get_sign"
 }
 ```
@@ -55,31 +54,40 @@ stdio 或单条 TCP 连接。
 `"debugServer": 47113` —— 无需扩展（[`probes/`](../../probes) 里的
 探针网正是这样驱动服务器的）；该形态手动起服时带 `--lldb-dir`。
 
-## launch 参数（已冻结，ADR-0003 决策 10）
+## launch 参数
+
+核心（`ktest`/`target`）按 ADR-0003 决策 10 冻结；扩展（`lldbDir`、
+`scope`、`ir`）走同一校验家法，各自随探针网落地。
 
 | 参数           | 类型             | 默认值    | 含义                                             |
 | -------------- | ---------------- | --------- | ------------------------------------------------ |
-| `ktest`        | string, 必填     | —         | 要回放的 `.ktest`（父进程侧校验）                |
-| `target`       | string, 必填     | —         | 被测二进制（以 `-lkleeRuntest` 链接）            |
+| `ktest`        | string, 必填     | —         | 要回放的 `.ktest`（父进程侧解析，结构化下发）    |
+| `target`       | string, 必填     | —         | 被测二进制（链 kleeRuntest 运行时）              |
 | `lldbDir`      | string           | boot argv | 含 `lldb`+`lldb-server` 的工具链目录；覆盖       |
 |                |                  |           | boot 时给的 `--lldb-dir`                         |
-| `stopOnEntry`  | boolean          | `false`   | 在入口点停住                                     |
-| `stopOnBranch` | boolean          | `false`   | 在每个被追踪分支停住（否则 M1 平价）             |
-| `scope`        | string           | `"module"`| 追踪范围：`"module"` 或函数名列表                |
-| `timeout`      | number           | 关闭      | 运行中止秒数（决策 9）                           |
+| `scope`        | string           | —         | branch-trace 插桩范围：`"module"` 或逗号分隔     |
+|                |                  |           | 函数名；缺席=不插桩、无报告                      |
+| `ir`           | string           | —         | 靶子的 `.ll` 路径（`clang -O0 -g -S -emit-llvm`， |
+|                |                  |           | M3）；在场=报告节点携 fork/runtime 注记；坏件    |
+|                |                  |           | =launch 拒（fail-fast，spawn 前）                |
 
 ## 分支追踪
 
-`scope` 范围内追踪恒开：被追踪站点记录后自动继续（M1 平价），有序
-报告——站点、命中、走向、逐站点摘要——在会话结束时经 `output` 推送
-至 Debug Console（纯被动：无请求面）。
-`"stopOnBranch": true` 时改为在每个站点拦停（`stopped`，reason
-`breakpoint`），实时暴露变量。
+追踪经 `scope` 显式开启：`configurationDone` 时会话自动插桩范围内全部
+条件站点（按载入地址设断）；每次命中发 `stopped`（reason `breakpoint`），
+有序报告——pc、函数、`file:line:column`、助记符、调用栈、注册符号值与
+ktest 字节对账注记——在会话结束时经 `output` 事件推送（纯被动：无请求面）。
+入口停不是站点。
+
+带 `ir`（M3，[ADR-0004](adr/0004-m3-path-narrowing.md)）：报告节点额外携
+`kind: "fork" | "runtime"` 加 `detail`（`symbolic-branch` /
+`function-not-in-module` / `concrete-condition`）——由 `.ll` 文本静态算出
+的 fork 子集。无 `ir` 则零注记字段（M1+M2 形状不变）。
 
 ## 限制（如实记录）
 
 - 每 server 进程单会话；多会话推迟
-- `evaluate`/`completions`（Debug Console REPL）推迟到 M2 之后
-- 末次追踪命中的走向不可观测（M1 盲区；M3 解决）
-- 追踪是记录路径决策的超集——KLEE fork 约束子集的映射需要
-  IR/DWARF（M3）
+- `evaluate`/`completions`（Debug Console REPL）按 ADR 推迟
+- 末次追踪命中的走向不可观测（站序隐含；ADR-0004 决策 5 定为 M3 non-goal）
+- 无 `ir` 时追踪是路径决策的超集；fork/runtime 注记做静态缩小（M3）；
+  动态输入依赖（差分回放）归 M4

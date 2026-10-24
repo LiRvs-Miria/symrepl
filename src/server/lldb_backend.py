@@ -34,7 +34,8 @@ from session_lifecycle import (CaptureNode, EmitExit, ExecOk, ExecState, ExecTri
                           poll_blocked, resolve_exec, step_exec)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "replay"))
-from branches import is_conditional            # E2 识别代数（本砖首消费点）
+from branches import is_conditional            # E2 识别代数（插桩筛选）
+import pathmark                                # M3 件（ir 注记源：classify/闭包）
 
 DEBUG_SERVER_ENV = "LLDB_DEBUGSERVER_PATH"    # LLDB 的消费通道名（启动层引用）
 
@@ -257,6 +258,8 @@ class Session:
             self._scope: str | None = None      # branch-trace 插桩范围（launch 可选参数）
             self._sym_objects: tuple[tuple[str, bytes], ...] = ()  # ktest 对象（父面解析下发，零文件 I/O）
             self._trace_nodes: list[dict] = []  # actual 轨迹节点（断点命中据实记录，零处理）
+            self._ir_module = None              # .ll 模块值（父面解析下发；None=M1+M2 层零增帧）
+            self._ir_forks: frozenset = frozenset()   # fork 站点集（launch 时闭包一次）
         except Exception as e:
             _created = True                     # 半初始化的 debugger 也是坑：进程内不许重试
             raise SessionError(_physical(e, SessionErrCode.BAD_TARGET), repr(e)) from e
@@ -275,6 +278,7 @@ class Session:
 
     def launch(self, ktest: str, *, scope: str | None = None,
                sym_objects: list[dict] | None = None,
+               ir_module: dict | None = None,
                stdout_path: str | None = None,
                stderr_path: str | None = None,
                timeout: float = 30.0) -> int:
@@ -283,7 +287,8 @@ class Session:
         scope=branch-trace 插桩范围（"module"或逗号分隔函数名；None=不插桩）。
         sym_objects=ktest 对象（父面已解析，{name, data_hex}；hex 坏=BAD_ARGS——
         本模块零 ktest 文件 I/O，对账字节以父面校验过的那份为准）。
-        回 inferior pid（端口面 process 事件的 systemProcessId 源）。"""
+        ir_module=.ll 模块（父面已解析的 pathmark 形状；形状坏=BAD_ARGS；
+        None=注记层缺席，报告零增帧）。回 inferior pid。"""
         try:
             old = self._exec
             step = step_exec(old, ExecTrigger.LAUNCH)
@@ -304,6 +309,17 @@ class Session:
                 #end try
             #end for
             self._sym_objects = tuple(objects)
+            self._ir_module = None
+            self._ir_forks = frozenset()
+            if ir_module is not None:
+                mod = pathmark.from_wire(ir_module)
+                if isinstance(mod, pathmark.ParseBad):
+                    raise SessionError(SessionErrCode.BAD_ARGS,
+                                       f"bad ir module: {mod.detail}")
+                #end if
+                self._ir_module = mod
+                self._ir_forks = frozenset(pathmark.fork_sites(mod))
+            #end if
             if self.debugserver_path:
                 # LLDB 消费该配置的唯一通道；参数驱动的单点赋值（发现归启动层）
                 os.environ[DEBUG_SERVER_ENV] = self.debugserver_path
@@ -444,7 +460,7 @@ class Session:
                     params: dict = {"exit_code": code}
                     if self._scope is not None:
                         params["trace_report"] = {"text": self._render_trace(),
-                                                  "nodes": self._trace_nodes}
+                                                  "nodes": self._annotated_nodes()}
                     #end if
                     for emit in ingest.emits:    # 发帧意图核声明，壳执行
                         match emit:
@@ -463,11 +479,19 @@ class Session:
     #end def
 
     def _capture_node(self, thread, order: int) -> dict:
-        """actual 节点（断点命中据实，零处理）：pc/function/mnemonic/调用栈/符号值。
+        """actual 节点（断点命中据实，零处理）：pc/function/源位置/mnemonic/调用栈/符号值。
         一致性注记（match/mismatch/ambiguous/unmatched）=派生层，原始值始终如实。"""
         frame = thread.GetFrameAtIndex(0)
         pc = int(frame.GetPC())
         function = frame.GetFunctionName() or f"0x{pc:x}"
+        line = column = 0
+        file_path = ""
+        entry = frame.GetLineEntry()
+        if entry.IsValid():
+            line = int(entry.GetLine())
+            column = int(entry.GetColumn())
+            file_path = entry.GetFileSpec().fullpath or ""
+        #end if
         mnemonic = ""
         instructions = self.target.ReadInstructions(frame.GetPCAddress(), 1)
         if instructions.GetSize() > 0:
@@ -501,7 +525,25 @@ class Session:
                             "ktest_hex": data.hex()})
         #end for
         return {"order": order, "address": pc, "function": function,
-                "mnemonic": mnemonic, "call_stack": call_stack, "symbols": symbols}
+                "file": file_path, "line": line, "column": column,
+                "mnemonic": mnemonic, "call_stack": call_stack,
+                "symbols": symbols}
+    #end def
+
+    def _annotated_nodes(self) -> list[dict]:
+        """报告节点=原始节点+M3 注记（派生层：kind/detail 从 .ll 算出——
+        记录节点保持据实，注记只落报告）。ir 缺席=原样（M1+M2 层零增帧）。"""
+        if self._ir_module is None:
+            return self._trace_nodes
+        #end if
+        nodes = []
+        for node in self._trace_nodes:
+            kind, detail = pathmark.classify(self._ir_forks, self._ir_module,
+                                             node["function"],
+                                             node.get("line", 0))
+            nodes.append({**node, "kind": kind, "detail": detail})
+        #end for
+        return nodes
     #end def
 
     def threads(self) -> list[dict]:
@@ -754,6 +796,9 @@ class Session:
         for node in self._trace_nodes:
             line = (f"  #{node['order']} 0x{node['address']:x} "
                     f"<{node['function']}> {node['mnemonic']}".rstrip())
+            if node.get("file"):
+                line += f" @ {node['file']}:{node['line']}"
+            #end if
             syms = "  ".join(f"{s['name']}={s.get('value', '?')}"
                              f"[{s['annotation']}]" for s in node["symbols"])
             if syms:

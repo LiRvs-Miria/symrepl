@@ -196,10 +196,32 @@ consumer needs to import the tree.
 ## M3 — LLVM IR / DWARF mapping
 
 - Map path decisions back to IR locations and source lines via DWARF.
+- **Delivered 2026-10-24** ([ADR-0004](adr/0004-m3-path-narrowing.md)):
+  static symbolic analysis of the target's `.ll`
+  (`src/replay/pathmark.py`, zero-dependency text scan) classifies every
+  traced site — `fork` / runtime noise (function not in module /
+  concrete condition) — surfaced as report annotations behind the
+  optional `ir` launch argument (unparsable `.ll` = launch rejected);
+  capture records `file:line:column` per site (line-level DWARF join;
+  instruction-level join excluded by the two-compilation construction).
+  Acceptance truth: get_sign three `.ktest` — test1 fork={L11},
+  test2/3 fork={L11, L13}. Taken/not-taken direction stays out of scope
+  (decision 5); differential input-dependence moved to M4
+  (issues #14/#16 → M4-a).
 
 ## M4 — Analysis overlays
 
-- Coverage and taint overlays on the replay trace.
+Three pillars (2026-10-24 scoping, user ruling) — all derived layers
+outside the replay loop:
+
+- **Coverage overlay** on the replay trace (site-level hit statistics
+  first).
+- **Taint overlay**: site × input-byte dependence, opened by the
+  differential replay matrix (M4-a: perturb `.ktest` symbol bytes,
+  replay N variants, outcome set >1 ⇒ input-dependent; flipping is a
+  necessary, not sufficient, condition — confidence levels reported
+  honestly). Doubles as a runtime mirror for the M3 static closure
+  boundaries.
 - **Path consistency verification** (added 2026-10-21, user ruling):
   consumes the branchTrace report for path modeling, solving and
   consistency checking — part of trace analysis. KLEE path constraints

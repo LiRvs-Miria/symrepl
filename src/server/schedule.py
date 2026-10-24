@@ -25,6 +25,7 @@ from childproto import BadChildMsg, ChildEvent, ChildRequest, ChildResponse, par
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "replay"))
 from ktest import KtestBad, load as ktest_load   # E1 件（launch 门禁：父面校验+解析一次）
+import pathmark                                  # M3 件（ir 门禁：同家法——父面校验+解析一次）
 
 SESSION_SCRIPT = str(Path(__file__).resolve().parent / "session.py")
 
@@ -301,6 +302,27 @@ async def run_effect(conn: "ConnState", action: Action) -> Outcome:
                 #end if
                 sym_objects = [{"name": o.name, "data_hex": o.data.hex()}
                                for o in parsed.objects]
+                # M3 ir 门禁（同 ktest refused 家法：fail-fast 在 spawn 前——
+                # 拒单不产生半会话）；好件解析一次结构化下发，子面零 .ll I/O。
+                ir_module = None
+                ir = req.arguments.get("ir")
+                if ir is not None:
+                    try:
+                        ir_text = Path(ir).read_text()
+                    except OSError as e:
+                        log(f"effect_failed action=FulfillLaunch outcome=Rejected "
+                            f"detail=ir unreadable: {e!r}")
+                        return Rejected(detail=f"ir refused: cannot read {ir!r}")
+                    #end try
+                    mod = pathmark.parse_module(ir_text)
+                    if isinstance(mod, pathmark.ParseBad):
+                        log(f"effect_failed action=FulfillLaunch outcome=Rejected "
+                            f"detail=ir {mod.reason.name}: {mod.detail}")
+                        return Rejected(detail=f"ir refused: "
+                                               f"{mod.reason.name}: {mod.detail}")
+                    #end if
+                    ir_module = pathmark.to_wire(mod)
+                #end if
                 child = await spawn_child([sys.executable, SESSION_SCRIPT,
                                            "--backend", conn.backend,
                                            "--lldb-dir", lldb_dir])
@@ -310,6 +332,9 @@ async def run_effect(conn: "ConnState", action: Action) -> Outcome:
                                  "sym_objects": sym_objects}
                 if req.arguments.get("scope") is not None:
                     launch_params["scope"] = req.arguments["scope"]
+                #end if
+                if ir_module is not None:
+                    launch_params["ir_module"] = ir_module
                 #end if
                 result = await child_request(child, "launch", launch_params)
             except Exception as e:                # 全捕获：收尸无条件；分类归 _physical

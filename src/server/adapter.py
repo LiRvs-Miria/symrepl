@@ -223,6 +223,9 @@ def validate_launch(args: dict):
     v = args.get("lldbDir")
     if v is not None and (not isinstance(v, str) or not v):
         return "launch 'lldbDir' must be a non-empty path string"
+    v = args.get("ir")
+    if v is not None and (not isinstance(v, str) or not v):
+        return "launch 'ir' must be a non-empty path string"
     return None
 #end def
 

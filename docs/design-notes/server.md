@@ -564,6 +564,43 @@ stale_reference，resume 家法世代语义真线兑现）；③全量 20 网 rc
 - **M3/M4 分工**：M3 答"这站是不是符号分支"（程序性质，静态）；M4 答
   "KLEE 在这条路径建立了哪些约束"（执行事实，.kquery）——将来两网互证
 
+**落地记录（2026-10-24，AI 小步转录+网逐步验证，随 issues 对账同步）**：
+- **步1 纯件 pathmark**（`src/replay/pathmark.py`）+ `probes/test_pathmark.py`
+  19 查：轻量 .ll 解析（Expect 代数，坏件当值 ParseBad：NO_MODULE/UNTERMINATED/
+  WIRE_BAD）+ 符号闭包不动点（seed=make_symbolic 首实参；传播臂=store/load/
+  icmp/实参→形参绑定；br 条件 ∈ values 即 fork 站点，无 !dbg 不出站点）；
+  `classify` 三分类（kind 二值 fork|runtime + detail 三判据）+ to_wire/from_wire
+  结构化下发。真件锚：clang 同配方 get_sign.ll fork={(get_sign,11),(get_sign,13)}
+  （裁决 6 真值一次通过）。AI 攻击一枚自收：regex 扫描 vs 真 EBNF 解析之辩——
+  用户裁维持 ADR 轻量扫描器（语义边界 phi/别名/GEP 换解析器不解决；域被同靶
+  同配方收窄；真解析两路线各税——llvmlite 首个第三方运行时依赖+DILocation 面
+  存疑 / ctypes 纯件纯度死），可靠性投资排语义侧（phi 传播=首个真撞到点）。
+- **步2 运行时面**：adapter validate_launch `ir` 形状行 → schedule FulfillLaunch
+  ir 门禁（**spawn 前 fail-fast**，ktest refused 家法：坏件/不可读=Rejected 不产生
+  半会话；好件解析一次 `ir_module` 结构化下发=sym_objects 家法同构，子面零 .ll
+  I/O）→ session 形状哨+透传 → lldb_backend（from_wire 坏形=BAD_ARGS；launch 时
+  闭包一次 `_ir_forks`；`_annotated_nodes` 报告副本加注记——**原始记录零处理红线
+  不破**）。probe_ir（**5705**，5703 已被 probe_step 占——端口撞车自纠）RED 7 FAIL
+  → ALL PASS。
+- **步3 源码归因（#15）+ 验收真值（#18）**：`_capture_node` 补 file/line/column
+  （LineEntry 据实捕获）+ `_render_trace` 行渲染 `@ <file>:<line>`（空路径省略，
+  stackFrame.source 家法）；probe_ir 增查 RED 5 FAIL→ALL PASS 25 查（get_sign/
+  two_objs 两 fixtures 源码对齐：two_objs line 集={11} 源码 if 行）；验收真值链
+  三 ktest 全中——test1 exit0/lines{11}（L13 早退不出现）、test2 exit1/{11,13}、
+  test3 exit255/{11,13}，节点全 fork/symbolic-branch。
+- **issues 对账（2026-10-24，规划真源收敛）**：GitHub issues（2026-10-09 形，
+  引 M1 退役前形状）与本机裁决心智对账——#13 关（ADR-0004 交付，D1 采静态闭包
+  非差分提案）；#14 关（M3-a 不入围，走向维持不落）；#16 关（差分回放移 M4=
+  新 #19 M4-a，污点叠加地基+pathmark 互证镜）；#12 M4 定形三支柱（覆盖率+污点+
+  一致性校验，用户裁"分析层尽量都做"）；#15/#17 交付关闭；剩余 #11/#18 随关账
+  关。progress.md 退役成桩：任务真源=issues，环境/红线/挂账迁 AGENTS.md（本地）。
+- **撞到即裁四笔**：①`GetFunctionName()` 对 C++ 回带签名 demangled 名——噪声A
+  不受影响（不在模块照样判 A），真 C++ 靶子 fork 判定才撞名字边界（挂账 AGENTS）；
+  ②probe 网自愈两枚（定长 burst 在 scope=module 长链白等烧窗 240s 挂→兴趣驱动
+  drain；disconnect 后不收 terminated→EPIPE exit=2，照 probe_trace P5 家法补收）；
+  ③dap.md M1 期残留清理（stopOnBranch/stopOnEntry/timeout 行退役，scope 缺省
+  语义纠正=不插桩）；④roadmap en/zh M3 交付标记+M4 三支柱定形同步。
+
 ## branchTrace 预扫描引导回放+报告（2026-10-21 定案，M2 收尾件）
 
 **定案链（用户，2026-10-21 三段演进）**：纯被动汇总（AI 提，废——用户：

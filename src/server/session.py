@@ -30,10 +30,12 @@ class DebugBackend(Protocol):
     停读面原语；continue_/wait_state/exit_code 随 continue 砖入册。"""
 
     def launch(self, ktest: str, *, scope: str | None = None,
-               sym_objects: list[dict] | None = None) -> int:
+               sym_objects: list[dict] | None = None,
+               ir_module: dict | None = None) -> int:
         """起 inferior 至入口停，回 inferior pid。scope=branch-trace 插桩范围
         （可选；None=不插桩）。sym_objects=ktest 对象（父面已解析，name+data_hex
-        结构化下发——backend 零 ktest 文件 I/O）。"""
+        结构化下发——backend 零 ktest 文件 I/O）。ir_module=.ll 模块（父面已
+        解析的 pathmark 结构化形状——backend 零 .ll 文件 I/O；M3 注记源）。"""
         ...
     #end def
 
@@ -213,10 +215,17 @@ def _launch(protocol_out, msg: dict) -> None:
             return
         #end if
     #end if
+    ir_module = params.get("ir_module")
+    if ir_module is not None and not isinstance(ir_module, dict):
+        _reply_err(protocol_out, msg, "bad_request",
+                   "launch ir_module must be an object when present")
+        return
+    #end if
     _run(protocol_out, msg,
          lambda: {"pid": _ensure_backend(params).launch(params["ktest"],
                                                         scope=scope,
-                                                        sym_objects=sym_objects)})
+                                                        sym_objects=sym_objects,
+                                                        ir_module=ir_module)})
 #end def
 
 
