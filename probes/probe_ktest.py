@@ -25,6 +25,15 @@ except ImportError as e:
     _IMPORT_DETAIL = f"{type(e).__name__}: {e}"
 #end try
 
+# 写侧（M4-a ADR-0006 准入，翻 E1 裁决①）独立守卫：dump 缺位只 D 系列红，不连坐读侧
+DUMP_OK = True
+try:
+    from ktest import dump
+except ImportError as e:
+    DUMP_OK = False
+    _DUMP_DETAIL = f"{type(e).__name__}: {e}"
+#end try
+
 KTESTS = ROOT / "third_party" / "klee" / "ktest"
 fails = []
 
@@ -187,6 +196,42 @@ case("形状：KtestBad 携 reason 枚举成员+detail 串", _bad_shape_pin)
 case("load：真路径同 parse(bytes)（六件同果）",
      lambda: all(_load_matches_parse(p) for p in REAL_FILES))
 case("load：缺文件 FileNotFoundError 传播（壳路 I/O）", _load_missing_pin)
+
+# ---- D 系列：写侧往返（M4-a ADR-0006；dump 缺位=仅 D 红，RED 基线） ----
+def _ok_ks():
+    """语料册 ok 臂逐件解析值（MODULE_OK 前提下调用）。"""
+    return [parse(data) for _, data, expect in CORPUS if expect[0] == "ok"]
+#end def
+
+def _d1() -> bool:
+    """往返对称：parse(dump(k)) == k，语料册 ok 例逐件（含 BOUT 读件——值相等，
+    魔不在值内）。"""
+    if not (MODULE_OK and DUMP_OK):
+        return False
+    #end if
+    return all(parse(dump(k)) == k for k in _ok_ks())
+#end def
+
+def _d2() -> bool:
+    """单魔：dump 产物首五字节恒 KTEST——BOUT legacy 读件也写回现行魔。"""
+    if not (MODULE_OK and DUMP_OK):
+        return False
+    #end if
+    return all(dump(k)[:5] == b"KTEST" for k in _ok_ks())
+#end def
+
+def _d3() -> bool:
+    """真件六件往返。"""
+    if not (MODULE_OK and DUMP_OK):
+        return False
+    #end if
+    return all(parse(dump(parse(p.read_bytes()))) == parse(p.read_bytes())
+               for p in REAL_FILES)
+#end def
+
+case("D1: dump 往返——语料册 ok 例逐件 parse(dump(k))==k（含 BOUT 读件）", _d1)
+case("D2: dump 单魔——BOUT 读件写回 KTEST（legacy 只读不写）", _d2)
+case("D3: dump 往返——真件六件", _d3)
 
 
 if __name__ == "__main__":

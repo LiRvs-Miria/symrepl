@@ -20,6 +20,7 @@ sync in the same commit.
 | 0003 — M2 architecture: DAP server on a parent/child topology | [en/adr/0003-m2-dap-server-architecture.md](en/adr/0003-m2-dap-server-architecture.md) | [zh-CN/adr/0003-m2-dap-server-architecture.md](zh-CN/adr/0003-m2-dap-server-architecture.md) |
 | 0004 — M3 path narrowing: the KLEE-fork subset via LLVM IR symbolic analysis | [en/adr/0004-m3-path-narrowing.md](en/adr/0004-m3-path-narrowing.md) | [zh-CN/adr/0004-m3-path-narrowing.md](zh-CN/adr/0004-m3-path-narrowing.md) |
 | 0005 — M4 path consistency verification: the symbolic path condition vs the replayed decisions | [en/adr/0005-m4-path-consistency.md](en/adr/0005-m4-path-consistency.md) | [zh-CN/adr/0005-m4-path-consistency.md](zh-CN/adr/0005-m4-path-consistency.md) |
+| 0006 — M4-a differential replay matrix: foundation of the taint overlay | [en/adr/0006-m4a-differential-replay-matrix.md](en/adr/0006-m4a-differential-replay-matrix.md) | [zh-CN/adr/0006-m4a-differential-replay-matrix.md](zh-CN/adr/0006-m4a-differential-replay-matrix.md) |
 
 ## Layout
 

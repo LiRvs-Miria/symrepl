@@ -166,3 +166,41 @@ def load(path: str | os.PathLike[str]) -> KtestOutcome:
         return parse(f.read())
     #end with
 #end def
+
+
+def _encode(s: str) -> bytes:
+    return s.encode("utf-8", errors="surrogateescape")
+#end def
+
+
+def dump(k: KTest) -> bytes:
+    """序列化 `.ktest` 值为字节串（写侧，ADR-0006 裁决 3；纯函数零 I/O）。
+
+    单魔：恒写 ``KTEST``（``BOUT\\n`` 仅读侧收）；布局同 parse 冻结规格——
+    version >= 2 写 sym 两域，version < 2 不写（v1 报告面 0/0 照布局缺席）。
+    名/串编码 utf-8/surrogateescape（与 _decode 互逆，任意读入值原样回写）。
+    ``parse(dump(k)) == k`` 对 parse 可产出的值成立。
+    """
+    out = bytearray()
+    out += KTEST_MAGIC
+    out += _UINT32.pack(k.version)
+    out += _UINT32.pack(len(k.args))
+    for arg in k.args:
+        raw = _encode(arg)
+        out += _UINT32.pack(len(raw))
+        out += raw
+    #end for
+    if k.version >= 2:
+        out += _UINT32.pack(k.sym_argvs)
+        out += _UINT32.pack(k.sym_argv_len)
+    #end if
+    out += _UINT32.pack(len(k.objects))
+    for obj in k.objects:
+        raw = _encode(obj.name)
+        out += _UINT32.pack(len(raw))
+        out += raw
+        out += _UINT32.pack(len(obj.data))
+        out += obj.data
+    #end for
+    return bytes(out)
+#end def
