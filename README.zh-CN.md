@@ -54,11 +54,17 @@ ptrfuzz 之于 symrepl，如同 Clang 之于 LLVM：从 ptrfuzz M2 起，symrepl
 
 ## 状态
 
-M2（DAP server 模式）是产品面，M1 的回放能力经它交付（原 M1 CLI 已于
-2026-10-22 退役——见 roadmap 的转正注记）。路线图见
+回放能力经 DAP server 交付：ktest 解析、沿追踪范围的断点、按序分支报告
+（含逐站点状态）与交互式步进（`next`/`stepIn`/`stepOut`，VS Code 内）。
+启用可选 `ir` 启动参数（M3，2026-10-24 交付——
+[ADR-0004](docs/zh-CN/adr/0004-m3-path-narrowing.md)）后，报告节点携带静态
+计算的 fork/runtime 标注，把轨迹收窄到路径决策。原 M1 CLI 已于
+2026-10-22 退役；今日无 CLI——DAP server 即产品面。
+
+下一步：M4 分析叠加层（覆盖率、差分回放的输入依赖、路径一致性校验；
+ADR-0005/0006）。路线图见
 [docs/roadmap.md](docs/zh-CN/roadmap.md)，M2 架构契约见
-[ADR-0003](docs/zh-CN/adr/0003-m2-dap-server-architecture.md)。下一步是
-M3（LLVM IR / DWARF 映射）。DAP 用法：
+[ADR-0003](docs/zh-CN/adr/0003-m2-dap-server-architecture.md)。DAP 用法：
 [docs/zh-CN/dap.md](docs/zh-CN/dap.md)。
 
 ## 运行要求

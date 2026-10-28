@@ -64,13 +64,20 @@ from ptrfuzz M2, symrepl becomes a library dependency.
 
 ## Status
 
-M2 (DAP server mode) is the product surface and M1's replay capability
-is delivered through it (the original M1 CLI was retired 2026-10-22 —
-see the roadmap's promotion notes).  See the
+Replay is delivered over the DAP server: ktest parsing, breakpoints
+along the traced scope, ordered branch reports with per-site state, and
+interactive stepping (`next`/`stepIn`/`stepOut`) in VS Code. With the
+optional `ir` launch argument (M3, delivered 2026-10-24 —
+[ADR-0004](docs/en/adr/0004-m3-path-narrowing.md)), report nodes carry
+statically-computed fork/runtime annotations that narrow the trace to
+the path decisions. The original M1 CLI was retired 2026-10-22; there
+is no CLI — the DAP server is the product surface.
+
+Next: M4 analysis overlays (coverage, input-dependence via differential
+replay, path-consistency checking; ADR-0005/0006).  See the
 [roadmap](docs/en/roadmap.md), the M2 architecture contract
 ([ADR-0003](docs/en/adr/0003-m2-dap-server-architecture.md)), and DAP
-usage: [docs/en/dap.md](docs/en/dap.md).  M3 (LLVM IR / DWARF mapping)
-is next.
+usage: [docs/en/dap.md](docs/en/dap.md).
 
 ## Requirements
 
