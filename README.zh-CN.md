@@ -47,9 +47,9 @@ symrepl 只消费**公开标准格式**：
 
 ## 生态
 
-[ptrfuzz](https://github.com/LiRvs-Miria/ptrfuzz) —— 面向无法承载 sanitizer
+[dbgfuzz](https://github.com/LiRvs-Miria/dbgfuzz) —— 面向无法承载 sanitizer
 runtime 目标的覆盖率引导模糊测试平台，构建在 symrepl 的调试侧基础设施之上。
-ptrfuzz 之于 symrepl，如同 Clang 之于 LLVM：从 ptrfuzz M2 起，symrepl 成为
+dbgfuzz 之于 symrepl，如同 Clang 之于 LLVM：从 dbgfuzz M2 起，symrepl 成为
 其库依赖。
 
 ## 状态

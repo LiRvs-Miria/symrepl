@@ -59,7 +59,7 @@ client. Research against the DAP specification, `lldb-dap`,
 2. **Internal protocol**: `Content-Length`-framed UTF-8 JSON — the
    same framing module used for DAP — over the child's stdin/stdout.
    Rules: a `hello` message carries a protocol **version** (cheap
-   insurance; the roadmap's ptrfuzz integration may one day drive this
+   insurance; the roadmap's dbgfuzz integration may one day drive this
    channel); every response carries a uniform **ok/error envelope**;
    `Content-Length` is capped (64 MiB) and counted in **encoded
    bytes**; a **malformed frame kills the session** (no resync).
@@ -182,7 +182,7 @@ client. Research against the DAP specification, `lldb-dap`,
   `not observed` honesty — carry over unchanged. DAP adds a transport,
   not new semantics.
 - The internal parent↔child protocol is private but now carries a
-  versioned handshake, so the roadmap's ptrfuzz integration can bind
+  versioned handshake, so the roadmap's dbgfuzz integration can bind
   to it deliberately instead of by accident.
 - Limitations, recorded honestly: single session per server process;
   `evaluate`/completions (the debug-console REPL) deferred; branch-site
@@ -207,4 +207,4 @@ implementation. Current wiring: `symrepl dap` dispatches to
 `local-cleanroom/server/schedule.py` as a subprocess (exit codes pass
 through); the parent process is `schedule.py`, the per-session child is
 `session.py`. Packaging of the DAP face is deferred until a real consumer
-(e.g. ptrfuzz) needs to import it.
+(e.g. dbgfuzz) needs to import it.

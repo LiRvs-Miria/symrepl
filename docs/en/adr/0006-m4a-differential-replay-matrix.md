@@ -75,7 +75,7 @@ Two prior rulings constrain this layer:
 ## Consequences
 
 - The taint overlay gets its foundation: site × input-byte dependency is
-  measurable, and the ptrfuzz ecosystem gains a library-level dependency
+  measurable, and the dbgfuzz ecosystem gains a library-level dependency
   (packaging deferred until demand is proven, the house rule).
 - E1's frozen read-only scope gains a write half with its own round-trip
   net; the ADR-0002 byte layout becomes write-covered as well.

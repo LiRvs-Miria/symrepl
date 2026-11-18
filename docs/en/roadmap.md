@@ -227,18 +227,18 @@ outside the replay loop:
   consistency checking — part of trace analysis. KLEE path constraints
   are consumed via the public `.kquery` format; if SMT solving would
   break the "thin bridge / zero-dependency" positioning, it becomes a
-  separate library-dependency project following the ptrfuzz model
+  separate library-dependency project following the dbgfuzz model
   (to be decided then). The comparison algebra pre-laid inside the
   replayer (`src/replay/branches.py` `equal`/`match_path`)
   is consumed by this layer and is not wired into the replay path.
 
 ## Ecosystem
 
-[ptrfuzz](https://github.com/LiRvs-Miria/ptrfuzz) builds a coverage-guided
+[dbgfuzz](https://github.com/LiRvs-Miria/dbgfuzz) builds a coverage-guided
 fuzzing platform on top of symrepl's debugger-side infrastructure — the
-Clang to symrepl's LLVM. From ptrfuzz M2, symrepl becomes a library
-dependency of ptrfuzz; the standard-format firewall (ADR-0001) applies to
-both. ptrfuzz development starts after symrepl M2.
+Clang to symrepl's LLVM. From dbgfuzz M2, symrepl becomes a library
+dependency of dbgfuzz; the standard-format firewall (ADR-0001) applies to
+both. dbgfuzz development starts after symrepl M2.
 
 ## Open questions
 

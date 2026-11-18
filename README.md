@@ -57,10 +57,10 @@ codebase or dialect does not belong here (see
 
 ## Ecosystem
 
-[ptrfuzz](https://github.com/LiRvs-Miria/ptrfuzz) — a coverage-guided
+[dbgfuzz](https://github.com/LiRvs-Miria/dbgfuzz) — a coverage-guided
 fuzzing platform for targets without sanitizer runtimes, built on symrepl's
-debugger-side infrastructure. ptrfuzz is to symrepl what Clang is to LLVM:
-from ptrfuzz M2, symrepl becomes a library dependency.
+debugger-side infrastructure. dbgfuzz is to symrepl what Clang is to LLVM:
+from dbgfuzz M2, symrepl becomes a library dependency.
 
 ## Status
 

@@ -27,7 +27,7 @@ Three prior rulings constrain this layer:
    report — KLEE path constraints are consumed via the **public `.kquery`
    format**; if SMT solving would break the thin-bridge / zero-dependency
    positioning, it becomes a separate library-dependency project following
-   the ptrfuzz model (decided when encountered).
+   the dbgfuzz model (decided when encountered).
 3. **E2 algebra pre-laid** (2026-10-21): `match_path`/`equal` in
    `replay/branches.py` compare (observed, target) site lists element-wise;
    they are **not wired into the replay path** and await their first
@@ -43,7 +43,7 @@ Three prior rulings constrain this layer:
    structural/parseable facts of the formula (constraint count, per-decision
    correspondence, variable/object binding) run without a solver; anything
    requiring a real solve (novel inputs, implication proofs) triggers the
-   ptrfuzz-model split per ruling 2 above.
+   dbgfuzz-model split per ruling 2 above.
 3. **The verification verdict** covers: every replay fork decision has a
    corresponding constraint on the KLEE side (no unexplained forks), the
    constraint sequence is consistent with the replay order, and mismatches
@@ -68,7 +68,7 @@ Three prior rulings constrain this layer:
   checks an execution fact (dynamic) — same structure as the multi-net
   house rule.
 - Zero-dependency is preserved at the default depth; the solver escape
-  hatch is pre-priced (ptrfuzz model) instead of silently growing a
+  hatch is pre-priced (dbgfuzz model) instead of silently growing a
   dependency.
 - The tool is optional and offline: sessions that never invoke it behave
   exactly as ADR-0004 leaves them.

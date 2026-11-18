@@ -48,7 +48,7 @@ M2 的目标（见 roadmap）：回放会话可被 VS Code 与任何 DAP 客户�
    父子之间说内部"请求/响应 + 事件"协议。
 2. **内部协议**：`Content-Length` 帧化的 UTF-8 JSON——与 DAP 共用同一个
    framing 模块——走子进程的 stdin/stdout。规则：`hello` 消息携带协议
-   **版本**（廉价保险；roadmap 中的 ptrfuzz 集成未来可能驱动这条通道）；
+   **版本**（廉价保险；roadmap 中的 dbgfuzz 集成未来可能驱动这条通道）；
    每个响应带统一的 **ok/error 信封**；`Content-Length` 设上限
    （64 MiB）且按**编码后字节数**计；**畸形帧直接杀会话**（不做重同步）。
 3. **传输**：默认 stdio 单会话；`symrepl dap --port N` 监听单个客户端
@@ -142,7 +142,7 @@ M2 的目标（见 roadmap）：回放会话可被 VS Code 与任何 DAP 客户�
 - M1 的语义——kleeRuntest 契约下的 ktest 注入、harness 违约呈现、
   带 `not observed` 诚实标注的有序分支追踪——原样沿用。DAP 只是新增
   传输层，不新增语义。
-- 父子内部协议是私有的，但现在带**版本化握手**：roadmap 中的 ptrfuzz
+- 父子内部协议是私有的，但现在带**版本化握手**：roadmap 中的 dbgfuzz
   集成可以有意识地绑定它，而不是碰巧绑上。
 - 局限（如实记录）：每 server 进程单会话；`evaluate`/completions
   （调试控制台 REPL）推迟；分支站点追踪对最后一击的走向依旧不可观测
@@ -161,4 +161,4 @@ DAP 面以 checkout 内脚本形态存在，不是安装包。上文的裁决（
 传输、DAP 子集）原样延续；文中模块路径指原始实现。现接线：`symrepl dap`
 以子进程方式派发 `local-cleanroom/server/schedule.py`（退出码透传）；
 父进程=`schedule.py`，每会话子进程=`session.py`。DAP 面的包化押后，
-待真实消费方（如 ptrfuzz）需要 import 时再做。
+待真实消费方（如 dbgfuzz）需要 import 时再做。

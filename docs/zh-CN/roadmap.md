@@ -175,16 +175,16 @@ cleanroom 重写即产品树，原地转正：`src/` 现在承载 DAP 面（`ser
   运行时互证镜。
 - **路径一致性校验**（2026-10-21 扩员，用户裁）：消费 branchTrace 报告做
   路径建模、求解与一致性校验——轨迹分析的一部分。KLEE 路径约束经公开
-  `.kquery` 消费；SMT 求解若破"薄桥/零依赖"定位，按 ptrfuzz 模式独立成库
+  `.kquery` 消费；SMT 求解若破"薄桥/零依赖"定位，按 dbgfuzz 模式独立成库
   依赖项目（届时再裁）。回放器内预铺的比对代数（`src/replay/
   branches.py` 的 `equal`/`match_path`）由此层消费，不接进回放链路。
 
 ## 生态
 
-[ptrfuzz](https://github.com/LiRvs-Miria/ptrfuzz) 在 symrepl 的调试侧基础设
-施之上构建覆盖率引导模糊测试平台——ptrfuzz 之于 symrepl，如同 Clang 之于
-LLVM。从 ptrfuzz M2 起，symrepl 成为 ptrfuzz 的库依赖；标准格式防火墙
-（ADR-0001）对两仓库同时生效。ptrfuzz 的开发在 symrepl M2 完成之后启动。
+[dbgfuzz](https://github.com/LiRvs-Miria/dbgfuzz) 在 symrepl 的调试侧基础设
+施之上构建覆盖率引导模糊测试平台——dbgfuzz 之于 symrepl，如同 Clang 之于
+LLVM。从 dbgfuzz M2 起，symrepl 成为 dbgfuzz 的库依赖；标准格式防火墙
+（ADR-0001）对两仓库同时生效。dbgfuzz 的开发在 symrepl M2 完成之后启动。
 
 ## 待决问题
 
